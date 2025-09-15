@@ -3700,7 +3700,8 @@ int Main::start() {
 		else if (E->next()) {
 			bool parsed_pair = true;
 			if (E->get() == "-s" || E->get() == "--script") {
-				script = E->next()->get();
+				// script = E->next()->get();
+				script = "";
 			} else if (E->get() == "--main-loop") {
 				main_loop_type = E->next()->get();
 #ifdef TOOLS_ENABLED

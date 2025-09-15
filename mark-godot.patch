@@ -1,0 +1,132 @@
+diff --git a/core/SCsub b/core/SCsub
+index f055a75cb7..0bf1a773a6 100644
+--- a/core/SCsub
++++ b/core/SCsub
+@@ -221,14 +221,48 @@ env.add_source_files(env.core_sources, gen_hash)
+ 
+ # Generate AES256 script encryption key
+ def encryption_key_builder(target, source, env):
++    xor_mask = 0xA5
++    hex_key = str(source[0])
++
++    try:
++        original_key = bytes.fromhex(hex_key)
++    except ValueError as e:
++        raise ValueError(f"Failed to parse hex key: {hex_key}\n{e}")
++
++    obfuscated_key = [b ^ xor_mask for b in original_key]
++    key_string = ", ".join(f"0x{b:02X}" for b in obfuscated_key)
++
+     with methods.generated_wrapper(target) as file:
+         file.write(
+             f"""\
+ #include "core/config/project_settings.h"
+ 
+-uint8_t script_encryption_key[32] = {{
+-	{source[0]}
+-}};"""
++static const uint8_t obfuscated_script_encryption_key[32] = {{
++    {key_string}
++}};
++
++uint8_t script_encryption_key[32];
++
++static void decrypt_script_encryption_key() {{
++    const uint8_t xor_mask = 0x{xor_mask:02X};
++    for (int i = 0; i < 32; ++i) {{
++        script_encryption_key[i] = obfuscated_script_encryption_key[i] ^ xor_mask;
++    }}
++}}
++
++#if defined(_MSC_VER)
++// MSVC-compatible static initializer
++struct ScriptKeyInitializer {{
++    ScriptKeyInitializer() {{ decrypt_script_encryption_key(); }}
++}};
++static ScriptKeyInitializer _script_key_initializer;
++#else
++// GCC/Clang-compatible constructor attribute
++__attribute__((constructor)) static void _script_key_initializer() {{
++    decrypt_script_encryption_key();
++}}
++#endif
++"""
+         )
+ 
+ 
+@@ -236,8 +270,8 @@ gdkey = os.environ.get("SCRIPT_AES256_ENCRYPTION_KEY", "0" * 64)
+ ec_valid = len(gdkey) == 64
+ if ec_valid:
+     try:
+-        gdkey = ", ".join([str(int(f"{a}{b}", 16)) for a, b in zip(gdkey[0::2], gdkey[1::2])])
+-    except Exception:
++        int(gdkey, 16)
++    except ValueError:
+         ec_valid = False
+ if not ec_valid:
+     methods.print_error(
+diff --git a/core/io/file_access_pack.cpp b/core/io/file_access_pack.cpp
+index 3fba2c7067..c1f3a1b2d7 100644
+--- a/core/io/file_access_pack.cpp
++++ b/core/io/file_access_pack.cpp
+@@ -286,7 +286,6 @@ bool PackedSourcePCK::try_open_pack(const String &p_path, bool p_replace_files,
+ 	if (enc_directory) {
+ 		Ref<FileAccessEncrypted> fae;
+ 		fae.instantiate();
+-		ERR_FAIL_COND_V_MSG(fae.is_null(), false, "Can't open encrypted pack directory.");
+ 
+ 		Vector<uint8_t> key;
+ 		key.resize(32);
+@@ -294,8 +293,7 @@ bool PackedSourcePCK::try_open_pack(const String &p_path, bool p_replace_files,
+ 			key.write[i] = script_encryption_key[i];
+ 		}
+ 
+-		Error err = fae->open_and_parse(f, key, FileAccessEncrypted::MODE_READ, false);
+-		ERR_FAIL_COND_V_MSG(err, false, "Can't open encrypted pack directory.");
++		fae->open_and_parse(f, key, FileAccessEncrypted::MODE_READ, false);
+ 		f = fae;
+ 	}
+ 
+@@ -468,7 +466,9 @@ void FileAccessPack::close() {
+ FileAccessPack::FileAccessPack(const String &p_path, const PackedData::PackedFile &p_file) :
+ 		pf(p_file),
+ 		f(FileAccess::open(pf.pack, FileAccess::READ)) {
+-	ERR_FAIL_COND_MSG(f.is_null(), vformat("Can't open pack-referenced file '%s'.", String(pf.pack)));
++		if (f.is_null()) {
++			return;
++		}
+ 
+ 	f->seek(pf.offset);
+ 	off = pf.offset;
+@@ -476,7 +476,6 @@ FileAccessPack::FileAccessPack(const String &p_path, const PackedData::PackedFil
+ 	if (pf.encrypted) {
+ 		Ref<FileAccessEncrypted> fae;
+ 		fae.instantiate();
+-		ERR_FAIL_COND_MSG(fae.is_null(), vformat("Can't open encrypted pack-referenced file '%s'.", String(pf.pack)));
+ 
+ 		Vector<uint8_t> key;
+ 		key.resize(32);
+@@ -484,8 +483,7 @@ FileAccessPack::FileAccessPack(const String &p_path, const PackedData::PackedFil
+ 			key.write[i] = script_encryption_key[i];
+ 		}
+ 
+-		Error err = fae->open_and_parse(f, key, FileAccessEncrypted::MODE_READ, false);
+-		ERR_FAIL_COND_MSG(err, vformat("Can't open encrypted pack-referenced file '%s'.", String(pf.pack)));
++		fae->open_and_parse(f, key, FileAccessEncrypted::MODE_READ, false);
+ 		f = fae;
+ 		off = 0;
+ 	}
+diff --git a/main/main.cpp b/main/main.cpp
+index 1c7955f089..8a37d67eb7 100644
+--- a/main/main.cpp
++++ b/main/main.cpp
+@@ -3700,7 +3700,8 @@ int Main::start() {
+ 		else if (E->next()) {
+ 			bool parsed_pair = true;
+ 			if (E->get() == "-s" || E->get() == "--script") {
+-				script = E->next()->get();
++				// script = E->next()->get();
++				script = "";
+ 			} else if (E->get() == "--main-loop") {
+ 				main_loop_type = E->next()->get();
+ #ifdef TOOLS_ENABLED

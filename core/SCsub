@@ -221,14 +221,48 @@ env.add_source_files(env.core_sources, gen_hash)
 
 # Generate AES256 script encryption key
 def encryption_key_builder(target, source, env):
+    xor_mask = 0xA5
+    hex_key = str(source[0])
+
+    try:
+        original_key = bytes.fromhex(hex_key)
+    except ValueError as e:
+        raise ValueError(f"Failed to parse hex key: {hex_key}\n{e}")
+
+    obfuscated_key = [b ^ xor_mask for b in original_key]
+    key_string = ", ".join(f"0x{b:02X}" for b in obfuscated_key)
+
     with methods.generated_wrapper(target) as file:
         file.write(
             f"""\
 #include "core/config/project_settings.h"
 
-uint8_t script_encryption_key[32] = {{
-	{source[0]}
-}};"""
+static const uint8_t obfuscated_script_encryption_key[32] = {{
+    {key_string}
+}};
+
+uint8_t script_encryption_key[32];
+
+static void decrypt_script_encryption_key() {{
+    const uint8_t xor_mask = 0x{xor_mask:02X};
+    for (int i = 0; i < 32; ++i) {{
+        script_encryption_key[i] = obfuscated_script_encryption_key[i] ^ xor_mask;
+    }}
+}}
+
+#if defined(_MSC_VER)
+// MSVC-compatible static initializer
+struct ScriptKeyInitializer {{
+    ScriptKeyInitializer() {{ decrypt_script_encryption_key(); }}
+}};
+static ScriptKeyInitializer _script_key_initializer;
+#else
+// GCC/Clang-compatible constructor attribute
+__attribute__((constructor)) static void _script_key_initializer() {{
+    decrypt_script_encryption_key();
+}}
+#endif
+"""
         )
 
 
@@ -236,8 +270,8 @@ gdkey = os.environ.get("SCRIPT_AES256_ENCRYPTION_KEY", "0" * 64)
 ec_valid = len(gdkey) == 64
 if ec_valid:
     try:
-        gdkey = ", ".join([str(int(f"{a}{b}", 16)) for a, b in zip(gdkey[0::2], gdkey[1::2])])
-    except Exception:
+        int(gdkey, 16)
+    except ValueError:
         ec_valid = False
 if not ec_valid:
     methods.print_error(
