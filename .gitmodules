@@ -1,0 +1,6 @@
+[submodule "modules/godotsteam"]
+	path = modules/godotsteam
+	url = https://codeberg.org/godotsteam/godotsteam.git
+[submodule "modules/godotsteam_multiplayer_peer"]
+	path = modules/godotsteam_multiplayer_peer
+	url = https://codeberg.org/godotsteam/multiplayerpeer.git
