@@ -60,14 +60,38 @@ def encryption_key_builder(target, source, env):
         )
         raise
 
+    obfuscated = bytes(b ^ 0xA5 for b in buffer)
+
     with methods.generated_wrapper(str(target[0])) as file:
         file.write(
             f"""\
 #include "core/config/project_settings.h"
+#include <string.h>
 
-uint8_t script_encryption_key[32] = {{
-	{methods.format_buffer(buffer, 1)}
-}};"""
+static const uint8_t obfuscated_script_encryption_key[32] = {{
+	{methods.format_buffer(obfuscated, 1)}
+}};
+
+uint8_t script_encryption_key[32] = {{ 0 }};
+
+static void decrypt_script_encryption_key(void) {{
+	for (int i = 0; i < 32; i++) {{
+		script_encryption_key[i] = obfuscated_script_encryption_key[i] ^ 0xA5;
+	}}
+}}
+
+#if defined(__GNUC__) || defined(__clang__)
+__attribute__((constructor))
+static void _init_script_encryption_key(void) {{
+	decrypt_script_encryption_key();
+}}
+#elif defined(_MSC_VER)
+#pragma section(".CRT$XCU", read)
+static void __cdecl _msvc_init_script_encryption_key(void) {{
+	decrypt_script_encryption_key();
+}}
+__declspec(allocate(".CRT$XCU")) void(__cdecl * _msvc_init_script_encryption_key_ptr)(void) = _msvc_init_script_encryption_key;
+#endif"""
         )
 
 
