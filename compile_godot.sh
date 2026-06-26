@@ -27,6 +27,7 @@ NO_DEPRECATED=0
 DO_CLEAN=0
 ALL_TEMPLATES=0
 JOBS=""
+UPLOAD_SYMBOLS_URL=""
 
 # ----------------------------------------------------------------------------------------
 # Helpers
@@ -50,12 +51,15 @@ Options:
   --lto MODE             Override LTO: none | thin | full
   --no-deprecated        Build with deprecated=no (smaller surface; may break old projects)
   --jobs N               Parallel jobs (default: detected core count)
+  --upload-symbols URL   After the build, POST each new .debugsymbols (keyed by its GNU
+                         Build ID) to a GDCrashCatch analyzer at URL/api/symbols. Needs
+                         CC_ADMIN_SECRET in the environment.
   --clean                scons --clean for the selected target, then exit
   -h, --help             Show this help
 
 Every build always includes:
   disable_overrides=yes
-  debug_symbols=yes separate_debug_symbols=yes   (stripped binary + .debug side file)
+  debug_symbols=yes separate_debug_symbols=yes   (stripped binary + .debugsymbols side file)
 EOF
 }
 
@@ -123,6 +127,9 @@ while [ $# -gt 0 ]; do
 		--jobs)
 			shift; [ $# -gt 0 ] || err "--jobs needs an argument"
 			JOBS="$1" ;;
+		--upload-symbols)
+			shift; [ $# -gt 0 ] || err "--upload-symbols needs a URL"
+			UPLOAD_SYMBOLS_URL="$1" ;;
 		--clean) DO_CLEAN=1 ;;
 		-h | --help) usage; exit 0 ;;
 		*) err "unknown argument: $1 (try --help)" ;;
@@ -210,12 +217,55 @@ build() {
 	fi
 }
 
-# Point out where the .debug side files landed so they can be archived for crash decoding.
+# Point out where the .debugsymbols side files landed so they can be archived for
+# crash decoding. Godot emits "<binary>.debugsymbols" (objcopy --only-keep-debug +
+# --add-gnu-debuglink) on Linux and Windows/MinGW. Optionally publishes them to a
+# GDCrashCatch analyzer keyed by GNU Build ID.
 report_debug_symbols() {
 	local plat="$1"
 	echo ">>> debug symbol files (archive these to symbolicate crash reports):"
-	# Godot writes the separated symbols next to the binary in bin/.
-	find bin -maxdepth 1 -name '*.debug' -newermt '-2 minutes' -print 2>/dev/null || true
+	local found=0
+	while IFS= read -r sym; do
+		found=1
+		echo "    $sym"
+		if [ -n "$UPLOAD_SYMBOLS_URL" ]; then
+			upload_symbols_file "$sym" "$plat"
+		fi
+	done < <(find bin -maxdepth 1 -name '*.debugsymbols' -newermt '-2 minutes' -print 2>/dev/null)
+	[ "$found" -eq 1 ] || echo "    (none found)"
+}
+
+# Extract the GNU Build ID from the stripped binary that pairs with a .debugsymbols
+# file, then POST the symbols to the analyzer's /api/symbols endpoint.
+upload_symbols_file() {
+	local sym="$1"
+	local plat="$2"
+	local binary="${sym%.debugsymbols}"
+
+	[ -n "${CC_ADMIN_SECRET:-}" ] || err "--upload-symbols needs CC_ADMIN_SECRET in the environment"
+	command -v curl >/dev/null 2>&1 || err "--upload-symbols needs curl"
+
+	# Extract just the hex Build ID. The note line wraps differently across
+	# readelf versions, so grep the 40-hex-char (SHA1) token rather than a column.
+	local build_id=""
+	local reader=""
+	command -v llvm-readelf >/dev/null 2>&1 && reader="llvm-readelf"
+	[ -z "$reader" ] && command -v readelf >/dev/null 2>&1 && reader="readelf"
+	if [ -n "$reader" ]; then
+		build_id="$("$reader" -n "$binary" 2>/dev/null | grep -ioE '[0-9a-f]{40}' | head -1)"
+	fi
+	if [ -z "$build_id" ]; then
+		echo "    ! could not read Build ID from $binary; skipping upload"
+		return
+	fi
+
+	echo "    uploading symbols (build_id=$build_id) to $UPLOAD_SYMBOLS_URL/api/symbols"
+	curl -fsS -H "X-CrashCatch-Admin: $CC_ADMIN_SECRET" \
+		-F "build_id=$build_id" -F "platform=$plat" \
+		-F "file=@$sym" \
+		"$UPLOAD_SYMBOLS_URL/api/symbols" >/dev/null \
+		&& echo "    ok" \
+		|| echo "    ! upload failed"
 }
 
 # ----------------------------------------------------------------------------------------
