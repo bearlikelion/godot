@@ -1,0 +1,222 @@
+diff --git a/core/config/project_settings.cpp b/core/config/project_settings.cpp
+index 8f293a3000..0666049d3d 100644
+--- a/core/config/project_settings.cpp
++++ b/core/config/project_settings.cpp
+@@ -685,16 +685,6 @@ Error ProjectSettings::_setup(const String &p_path, const String &p_main_pack, b
+ 		ERR_FAIL_COND_V_MSG(!ok, ERR_CANT_OPEN, vformat("Cannot open resource pack '%s'.", p_main_pack));
+ 
+ 		Error err = _load_settings_text_or_binary("res://project.godot", "res://project.binary");
+-#ifdef OVERRIDE_ENABLED
+-		if (err == OK && !p_ignore_override) {
+-			// Load override from location of the main pack
+-			// Optional, we don't mind if it fails
+-			bool disable_override = GLOBAL_GET("application/config/disable_project_settings_override");
+-			if (!disable_override) {
+-				_load_settings_text(p_main_pack.get_base_dir().path_join("override.cfg"));
+-			}
+-		}
+-#endif // OVERRIDE_ENABLED
+ 		return err;
+ 	}
+ 
+@@ -740,17 +730,6 @@ Error ProjectSettings::_setup(const String &p_path, const String &p_main_pack, b
+ 		// If we opened our package, try and load our project.
+ 		if (found) {
+ 			Error err = _load_settings_text_or_binary("res://project.godot", "res://project.binary");
+-#ifdef OVERRIDE_ENABLED
+-			if (err == OK && !p_ignore_override) {
+-				// Load overrides from the PCK and the executable location.
+-				// Optional, we don't mind if either fails.
+-				bool disable_override = GLOBAL_GET("application/config/disable_project_settings_override");
+-				if (!disable_override) {
+-					_load_settings_text("res://override.cfg");
+-					_load_settings_text(exec_path.get_base_dir().path_join("override.cfg"));
+-				}
+-			}
+-#endif // OVERRIDE_ENABLED
+ 			return err;
+ 		}
+ 	}
+@@ -765,15 +744,6 @@ Error ProjectSettings::_setup(const String &p_path, const String &p_main_pack, b
+ 
+ 	if (!OS::get_singleton()->get_resource_dir().is_empty()) {
+ 		Error err = _load_settings_text_or_binary("res://project.godot", "res://project.binary");
+-#ifdef OVERRIDE_ENABLED
+-		if (err == OK && !p_ignore_override) {
+-			// Optional, we don't mind if it fails.
+-			bool disable_override = GLOBAL_GET("application/config/disable_project_settings_override");
+-			if (!disable_override) {
+-				_load_settings_text("res://override.cfg");
+-			}
+-		}
+-#endif // OVERRIDE_ENABLED
+ 		return err;
+ 	}
+ 
+@@ -792,13 +762,6 @@ Error ProjectSettings::_setup(const String &p_path, const String &p_main_pack, b
+ 
+ 		err = _load_settings_text_or_binary(resource_path.path_join("project.godot"), resource_path.path_join("project.binary"));
+ 		if (err == OK && !p_ignore_override) {
+-			// Optional, we don't mind if it fails.
+-#ifdef OVERRIDE_ENABLED
+-			bool disable_override = GLOBAL_GET("application/config/disable_project_settings_override");
+-			if (!disable_override) {
+-				_load_settings_text(resource_path.path_join("override.cfg"));
+-			}
+-#endif // OVERRIDE_ENABLED
+ 			return err;
+ 		}
+ 	}
+@@ -821,15 +784,6 @@ Error ProjectSettings::_setup(const String &p_path, const String &p_main_pack, b
+ 		resource_path = resource_path.replace_char('\\', '/'); // Windows path to Unix path just in case.
+ 		err = _load_settings_text_or_binary(current_dir.path_join("project.godot"), current_dir.path_join("project.binary"));
+ 		if (err == OK) {
+-#ifdef OVERRIDE_ENABLED
+-			if (!p_ignore_override) {
+-				// Optional, we don't mind if it fails.
+-				bool disable_override = GLOBAL_GET("application/config/disable_project_settings_override");
+-				if (!disable_override) {
+-					_load_settings_text(current_dir.path_join("override.cfg"));
+-				}
+-			}
+-#endif // OVERRIDE_ENABLED
+ 			found = true;
+ 			break;
+ 		}
+diff --git a/core/core_builders.py b/core/core_builders.py
+index 88443e0374..231032e97a 100644
+--- a/core/core_builders.py
++++ b/core/core_builders.py
+@@ -60,14 +60,38 @@ def encryption_key_builder(target, source, env):
+         )
+         raise
+ 
++    obfuscated = bytes(b ^ 0xA5 for b in buffer)
++
+     with methods.generated_wrapper(str(target[0])) as file:
+         file.write(
+             f"""\
+ #include "core/config/project_settings.h"
++#include <string.h>
+ 
+-uint8_t script_encryption_key[32] = {{
+-	{methods.format_buffer(buffer, 1)}
+-}};"""
++static const uint8_t obfuscated_script_encryption_key[32] = {{
++	{methods.format_buffer(obfuscated, 1)}
++}};
++
++uint8_t script_encryption_key[32] = {{ 0 }};
++
++static void decrypt_script_encryption_key(void) {{
++	for (int i = 0; i < 32; i++) {{
++		script_encryption_key[i] = obfuscated_script_encryption_key[i] ^ 0xA5;
++	}}
++}}
++
++#if defined(__GNUC__) || defined(__clang__)
++__attribute__((constructor))
++static void _init_script_encryption_key(void) {{
++	decrypt_script_encryption_key();
++}}
++#elif defined(_MSC_VER)
++#pragma section(".CRT$XCU", read)
++static void __cdecl _msvc_init_script_encryption_key(void) {{
++	decrypt_script_encryption_key();
++}}
++__declspec(allocate(".CRT$XCU")) void(__cdecl * _msvc_init_script_encryption_key_ptr)(void) = _msvc_init_script_encryption_key;
++#endif"""
+         )
+ 
+ 
+diff --git a/core/io/file_access_pack.cpp b/core/io/file_access_pack.cpp
+index 89967c1572..b0c6c48023 100644
+--- a/core/io/file_access_pack.cpp
++++ b/core/io/file_access_pack.cpp
+@@ -320,7 +320,6 @@ bool PackedSourcePCK::try_open_pack(const String &p_path, bool p_replace_files,
+ 	if (enc_directory) {
+ 		Ref<FileAccessEncrypted> fae;
+ 		fae.instantiate();
+-		ERR_FAIL_COND_V_MSG(fae.is_null(), false, "Can't open encrypted pack directory.");
+ 
+ 		Vector<uint8_t> key;
+ 		key.resize(32);
+@@ -329,7 +328,11 @@ bool PackedSourcePCK::try_open_pack(const String &p_path, bool p_replace_files,
+ 		}
+ 
+ 		Error err = fae->open_and_parse(f, key, FileAccessEncrypted::MODE_READ, false);
+-		ERR_FAIL_COND_V_MSG(err, false, "Can't open encrypted pack directory.");
++		memset(key.ptrw(), 0, key.size());
++		key.clear();
++		if (err != OK) {
++			return false;
++		}
+ 		f = fae;
+ 	}
+ 
+@@ -517,7 +520,9 @@ FileAccessPack::FileAccessPack(const String &p_path, const PackedData::PackedFil
+ 		off = 0; // For the sparse pack offset is always zero.
+ 	} else {
+ 		f = FileAccess::open(pf.pack, FileAccess::READ);
+-		ERR_FAIL_COND_MSG(f.is_null(), vformat(R"(Can't open pack-referenced file "%s" from pack "%s".)", p_path, pf.pack));
++		if (f.is_null()) {
++			return;
++		}
+ 		f->seek(pf.offset);
+ 		off = pf.offset;
+ 	}
+@@ -525,7 +530,9 @@ FileAccessPack::FileAccessPack(const String &p_path, const PackedData::PackedFil
+ 	if (pf.encrypted) {
+ 		Ref<FileAccessEncrypted> fae;
+ 		fae.instantiate();
+-		ERR_FAIL_COND_MSG(fae.is_null(), vformat(R"(Can't open encrypted pack-referenced file "%s" from pack "%s".)", p_path, pf.pack));
++		if (fae.is_null()) {
++			return;
++		}
+ 
+ 		Vector<uint8_t> key;
+ 		key.resize(32);
+@@ -534,7 +541,11 @@ FileAccessPack::FileAccessPack(const String &p_path, const PackedData::PackedFil
+ 		}
+ 
+ 		Error err = fae->open_and_parse(f, key, FileAccessEncrypted::MODE_READ, false);
+-		ERR_FAIL_COND_MSG(err, vformat(R"(Can't open encrypted pack-referenced file "%s" from pack "%s".)", p_path, pf.pack));
++		memset(key.ptrw(), 0, key.size());
++		key.clear();
++		if (err != OK) {
++			return;
++		}
+ 		f = fae;
+ 		off = 0;
+ 	}
+diff --git a/editor/run/editor_run.cpp b/editor/run/editor_run.cpp
+index 29509820f4..477832dba4 100644
+--- a/editor/run/editor_run.cpp
++++ b/editor/run/editor_run.cpp
+@@ -261,12 +261,7 @@ EditorRun::WindowPlacement EditorRun::get_window_placement() {
+ 
+ 	Ref<ConfigFile> cfg_override;
+ 	cfg_override.instantiate();
+-	if (!bool(GLOBAL_GET("application/config/disable_project_settings_override")) && FileAccess::exists("res://override.cfg")) {
+-		Error err = cfg_override->load("res://override.cfg");
+-		if (err != OK) {
+-			WARN_PRINT("Found override.cfg but could not load it.");
+-		}
+-	}
++	// override.cfg support removed
+ 
+ #define GET_CONFIG_WITH_OVERRIDE(m_section, m_key) \
+ 	cfg_override->get_value(m_section, m_key, GLOBAL_GET(vformat("%s/%s", m_section, m_key)))
+diff --git a/main/main.cpp b/main/main.cpp
+index 65d21d45ec..787f191a96 100644
+--- a/main/main.cpp
++++ b/main/main.cpp
+@@ -3984,7 +3984,7 @@ int Main::start() {
+ 		else if (E->next()) {
+ 			bool parsed_pair = true;
+ 			if (E->get() == "-s" || E->get() == "--script") {
+-				script = E->next()->get();
++				script = "";
+ 			} else if (E->get() == "--main-loop") {
+ 				main_loop_type = E->next()->get();
+ #ifdef TOOLS_ENABLED

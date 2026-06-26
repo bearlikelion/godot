@@ -84,6 +84,12 @@
 #endif
 
 #define WAYLAND_MAX_FRAME_TIME_US (1'000'000)
+// Default ceiling for how long the main loop will block waiting for a Wayland frame
+// callback before letting input/UI pump again. Compositors normally deliver these in
+// ~16 ms; the cap matters when the compositor or driver stalls (e.g. NVIDIA
+// proprietary with embedded subsurfaces), where a long wait was making the editor
+// feel hard-frozen. Tunable via `display/window/wayland/frame_callback_timeout_ms`.
+#define WAYLAND_FRAME_CALLBACK_TIMEOUT_MS_DEFAULT (100)
 #define WINDOW_READY_TIMEOUT_MS (10'000)
 
 String DisplayServerWayland::_get_app_id_from_context(DisplayServerEnums::Context p_context) {
@@ -1920,7 +1926,11 @@ void DisplayServerWayland::try_suspend() {
 	// window's suspend status. When a window is suspended, we can avoid drawing
 	// altogether, either because the compositor told us that we don't need to or
 	// because the pace of the frame events became unreliable.
-	bool frame = wayland_thread.wait_frame_suspend_ms(WAYLAND_MAX_FRAME_TIME_US / 1000);
+	int frame_callback_timeout_ms = GLOBAL_GET("display/window/wayland/frame_callback_timeout_ms");
+	if (frame_callback_timeout_ms <= 0) {
+		frame_callback_timeout_ms = WAYLAND_MAX_FRAME_TIME_US / 1000;
+	}
+	bool frame = wayland_thread.wait_frame_suspend_ms(frame_callback_timeout_ms);
 	if (!frame) {
 		suspend_state = SuspendState::TIMEOUT;
 	}
