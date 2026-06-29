@@ -29,6 +29,12 @@ DO_CLEAN=0
 ALL_TEMPLATES=0
 JOBS=""
 UPLOAD_SYMBOLS_URL=""
+MACOS_ARCH="universal"   # universal | arm64 | x86_64 (osxcross cross-builds only)
+OSXCROSS_SDK=""          # e.g. darwin24.4; required when cross-compiling macOS
+USE_PODMAN=0             # build linux inside the old-glibc buildroot container
+PODMAN_IMAGE="localhost/godot-linux:4.7-f43"
+PODMAN_ARCH="x86_64"     # x86_64 | i686 | aarch64 | arm (buildroot SDK arch)
+OSXCROSS_ROOT="${OSXCROSS_ROOT:-}"  # osxcross install root; required (with its target/bin on PATH) for macOS cross-builds
 
 # ----------------------------------------------------------------------------------------
 # Helpers
@@ -40,7 +46,8 @@ compile_godot.sh - cross-platform Godot build driver
 Target platform (default: host OS):
   --linux                Build for Linux (platform=linuxbsd)
   --windows              Build for Windows (platform=windows; needs mingw when cross-compiling)
-  --macos                Build for macOS (platform=macos; build on macOS)
+  --macos                Build for macOS (platform=macos; build on macOS, or cross-compile
+                          via osxcross on Linux with --osxcross-sdk)
 
 Build type (default: --editor):
   --editor               Editor build (dev_build, clang+mold+ccache, no LTO)
@@ -56,6 +63,16 @@ Options:
   --upload-symbols URL   After the build, POST each new .debugsymbols (keyed by its GNU
                          Build ID) to a GDCrashCatch analyzer at URL/api/symbols. Needs
                          CC_ADMIN_SECRET in the environment.
+  --osxcross-sdk SDK     osxcross SDK/toolchain id (e.g. darwin24.4) for cross-compiling
+                         macOS from Linux. Requires osxcross's target/bin on PATH.
+  --macos-arch ARCH      universal | arm64 | x86_64 (default: universal) for macOS builds.
+  --podman               Build linux (platform=linuxbsd) inside the godot-linux buildroot
+                          container (GCC, glibc 2.28 baseline) instead of the host
+                          toolchain, so the resulting binary runs on older glibc systems
+                          (e.g. Steam Deck). Requires the godot-linux:4.7-f43 image; see
+                          build-containers/build.sh in the godotengine/build-containers repo.
+  --podman-image IMG     Override the container image (default: localhost/godot-linux:4.7-f43)
+  --podman-arch ARCH     x86_64 | i686 | aarch64 | arm (default: x86_64)
   --clean                scons --clean for the selected target, then exit
   -h, --help             Show this help
 
@@ -106,7 +123,18 @@ check_toolchain() {
 	fi
 
 	if [ "$plat" = "macos" ] && [ "$host" != "macos" ]; then
-		err "macOS builds must run on macOS (osxcross/MoltenVK not assumed here)"
+		[ -n "$OSXCROSS_SDK" ] || err "cross-compiling macOS from $host needs --osxcross-sdk (e.g. darwin24.4)"
+		command -v "x86_64-apple-${OSXCROSS_SDK}-clang" >/dev/null 2>&1 ||
+			err "osxcross toolchain for sdk '$OSXCROSS_SDK' not found on PATH (expected x86_64-apple-${OSXCROSS_SDK}-clang)"
+		if [ -z "$OSXCROSS_ROOT" ]; then
+			# scons gates platform=macos support on OSXCROSS_ROOT being set (see
+			# platform/macos/detect.py can_build()); derive it from the toolchain on PATH
+			# if not already exported (osxcross root is the parent of target/bin).
+			local osxcross_bin
+			osxcross_bin="$(command -v "x86_64-apple-${OSXCROSS_SDK}-clang")"
+			OSXCROSS_ROOT="$(cd "$(dirname "$osxcross_bin")/../.." && pwd)"
+		fi
+		export OSXCROSS_ROOT
 	fi
 }
 
@@ -133,6 +161,19 @@ while [ $# -gt 0 ]; do
 		--upload-symbols)
 			shift; [ $# -gt 0 ] || err "--upload-symbols needs a URL"
 			UPLOAD_SYMBOLS_URL="$1" ;;
+		--osxcross-sdk)
+			shift; [ $# -gt 0 ] || err "--osxcross-sdk needs an argument"
+			OSXCROSS_SDK="$1" ;;
+		--macos-arch)
+			shift; [ $# -gt 0 ] || err "--macos-arch needs an argument"
+			MACOS_ARCH="$1" ;;
+		--podman) USE_PODMAN=1 ;;
+		--podman-image)
+			shift; [ $# -gt 0 ] || err "--podman-image needs an argument"
+			PODMAN_IMAGE="$1" ;;
+		--podman-arch)
+			shift; [ $# -gt 0 ] || err "--podman-arch needs an argument"
+			PODMAN_ARCH="$1" ;;
 		--clean) DO_CLEAN=1 ;;
 		-h | --help) usage; exit 0 ;;
 		*) err "unknown argument: $1 (try --help)" ;;
@@ -147,12 +188,26 @@ done
 # Build command assembly
 # ----------------------------------------------------------------------------------------
 
-# Run a single scons build. Args: <platform> <build-type>
+# Run a single scons build. Args: <platform> <build-type> [arch override]
 build() {
 	local plat="$1"
 	local btype="$2"
+	local arch_override="${3:-}"
 
-	check_toolchain "$plat"
+	# macOS has no scons arch=universal; build arm64 + x86_64 separately and lipo them.
+	if [ "$plat" = "macos" ] && [ "$MACOS_ARCH" = "universal" ] && [ -z "$arch_override" ]; then
+		build "$plat" "$btype" "arm64"
+		build "$plat" "$btype" "x86_64"
+		lipo_macos_universal "$btype"
+		return
+	fi
+
+	local use_podman=0
+	if [ "$plat" = "linuxbsd" ] && [ "$USE_PODMAN" -eq 1 ]; then
+		use_podman=1
+	else
+		check_toolchain "$plat"
+	fi
 
 	# Base flags shared by every build.
 	local -a args=(
@@ -163,14 +218,25 @@ build() {
 		"-j$JOBS"
 	)
 
+	if [ "$plat" = "macos" ]; then
+		args+=("arch=${arch_override:-$MACOS_ARCH}")
+		if [ -n "$OSXCROSS_SDK" ]; then
+			args+=("osxcross_sdk=$OSXCROSS_SDK")
+		fi
+	fi
+
+	if [ "$use_podman" -eq 1 ]; then
+		args+=("arch=$PODMAN_ARCH")
+	fi
+
 	case "$btype" in
 		editor)
 			args+=("target=editor")
 			if [ "$DEV_BUILD" -eq 1 ]; then
 				args+=("dev_build=yes")
 			fi
-			# Fast iteration toolchain only makes sense on a Linux host build.
-			if [ "$plat" = "linuxbsd" ]; then
+			# Fast iteration toolchain only makes sense on a native Linux host build.
+			if [ "$plat" = "linuxbsd" ] && [ "$use_podman" -eq 0 ]; then
 				args+=(
 					"use_llvm=yes"
 					"linker=mold"
@@ -212,12 +278,65 @@ build() {
 		args+=("--clean")
 	fi
 
-	echo ">>> scons ${args[*]}"
-	scons "${args[@]}"
+	if [ "$use_podman" -eq 1 ]; then
+		run_podman_scons "${args[@]}"
+	else
+		echo ">>> scons ${args[*]}"
+		scons "${args[@]}"
+	fi
 
 	if [ "$DO_CLEAN" -eq 0 ]; then
 		report_debug_symbols "$plat"
 	fi
+}
+
+# Combine the arm64 + x86_64 macOS binaries scons just built into one universal (fat)
+# binary via lipo, matching the official godot-build-scripts approach (scons has no
+# arch=universal of its own).
+lipo_macos_universal() {
+	local btype="$1"
+	local target_suffix
+	case "$btype" in
+		editor) target_suffix="editor" ;;
+		release) target_suffix="template_release" ;;
+		debug-template) target_suffix="template_debug" ;;
+		*) err "internal: unknown build type '$btype'" ;;
+	esac
+
+	command -v lipo >/dev/null 2>&1 || err "lipo not found on PATH (expected from osxcross)"
+
+	local arm64_bin="bin/godot.macos.${target_suffix}.arm64"
+	local x86_64_bin="bin/godot.macos.${target_suffix}.x86_64"
+	local universal_bin="bin/godot.macos.${target_suffix}.universal"
+
+	[ -f "$arm64_bin" ] || err "expected arm64 binary not found: $arm64_bin"
+	[ -f "$x86_64_bin" ] || err "expected x86_64 binary not found: $x86_64_bin"
+
+	echo ">>> lipo -create $arm64_bin $x86_64_bin -output $universal_bin"
+	lipo -create "$arm64_bin" "$x86_64_bin" -output "$universal_bin"
+	echo ">>> universal binary: $universal_bin"
+	lipo -info "$universal_bin"
+}
+
+# Run a scons build inside the godot-linux buildroot container (GCC, old glibc baseline)
+# so the resulting binary works on systems with older glibc than this host's (e.g. Steam
+# Deck). Mounts the repo read-write so build artifacts land directly in bin/.
+run_podman_scons() {
+	command -v podman >/dev/null 2>&1 || err "podman not found on PATH"
+	podman image exists "$PODMAN_IMAGE" ||
+		err "podman image '$PODMAN_IMAGE' not found; build it from godotengine/build-containers (Dockerfile.base + Dockerfile.linux)"
+
+	local sdk_dir="${PODMAN_ARCH}-godot-linux-gnu_sdk-buildroot"
+	if [ "$PODMAN_ARCH" = "arm" ]; then
+		sdk_dir="arm-godot-linux-gnueabihf_sdk-buildroot"
+	fi
+
+	echo ">>> podman run (image=$PODMAN_IMAGE, arch=$PODMAN_ARCH) scons $*"
+	podman run --rm \
+		-v "$(pwd)":/root/godot:z \
+		-w /root/godot \
+		"$PODMAN_IMAGE" \
+		bash -c "export PATH=\"/root/${sdk_dir}/bin:\$PATH\" && scons $(printf '%q ' "$@")"
 }
 
 # Point out where the .debugsymbols side files landed so they can be archived for
@@ -277,7 +396,7 @@ upload_symbols_file() {
 if [ "$ALL_TEMPLATES" -eq 1 ]; then
 	host="$(detect_host_platform)"
 	platforms=("linuxbsd" "windows")
-	if [ "$host" = "macos" ]; then
+	if [ "$host" = "macos" ] || [ -n "$OSXCROSS_SDK" ]; then
 		platforms+=("macos")
 	fi
 	for p in "${platforms[@]}"; do

@@ -118,6 +118,7 @@ void CrashCatchHandlers::uninstall() {
 
 #include <fcntl.h>
 #include <io.h>
+#include <sys/stat.h>
 #include <windows.h>
 
 static LPTOP_LEVEL_EXCEPTION_FILTER s_old_filter = nullptr;

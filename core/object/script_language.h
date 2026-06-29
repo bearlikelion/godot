@@ -473,7 +473,9 @@ public:
 
 VARIANT_ENUM_CAST(ScriptLanguage::ScriptNameCasing);
 
-extern uint8_t script_encryption_key[32];
+// Decrypts the embedded script encryption key into r_key (32 bytes). The plaintext key is
+// not kept resident anywhere else; callers must zero r_key as soon as they're done with it.
+void get_script_encryption_key(uint8_t r_key[32]);
 
 class PlaceHolderScriptInstance : public ScriptInstance {
 	Object *owner = nullptr;

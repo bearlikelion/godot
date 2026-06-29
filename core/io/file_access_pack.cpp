@@ -328,20 +328,24 @@ bool PackedSourcePCK::try_open_pack(const String &p_path, bool p_replace_files, 
 		Ref<FileAccessEncrypted> fae;
 		fae.instantiate();
 
+		uint8_t embedded_key[32];
+		get_script_encryption_key(embedded_key);
+
 		Vector<uint8_t> key;
 #ifdef TOOLS_ENABLED
 		if (!p_decryption_key.is_empty()) {
 			ERR_FAIL_COND_V_MSG(p_decryption_key.size() != 32, false, "Decryption key must be 256-bit.");
 			constexpr uint8_t empty_key[32] = {};
-			if (memcmp(script_encryption_key, empty_key, sizeof(empty_key)) == 0) {
+			if (memcmp(embedded_key, empty_key, sizeof(empty_key)) == 0) {
 				key = p_decryption_key;
 			}
 		} else
 #endif
 		{
 			key.resize(32);
-			memcpy(key.ptrw(), script_encryption_key, 32);
+			memcpy(key.ptrw(), embedded_key, 32);
 		}
+		memset(embedded_key, 0, sizeof(embedded_key));
 
 		Error err = fae->open_and_parse(f, key, FileAccessEncrypted::MODE_READ, false);
 		memset(key.ptrw(), 0, key.size());
@@ -564,20 +568,24 @@ FileAccessPack::FileAccessPack(const String &p_path, const PackedData::PackedFil
 			return;
 		}
 
+		uint8_t embedded_key[32];
+		get_script_encryption_key(embedded_key);
+
 		Vector<uint8_t> key;
 #ifdef TOOLS_ENABLED
 		if (!p_decryption_key.is_empty()) {
 			ERR_FAIL_COND_MSG(p_decryption_key.size() != 32, "Decryption key must be 256-bit.");
 			constexpr uint8_t empty_key[32] = {};
-			if (memcmp(script_encryption_key, empty_key, sizeof(empty_key)) == 0) {
+			if (memcmp(embedded_key, empty_key, sizeof(empty_key)) == 0) {
 				key = p_decryption_key;
 			}
 		} else
 #endif
 		{
 			key.resize(32);
-			memcpy(key.ptrw(), script_encryption_key, 32);
+			memcpy(key.ptrw(), embedded_key, 32);
 		}
+		memset(embedded_key, 0, sizeof(embedded_key));
 
 		Error err = fae->open_and_parse(f, key, FileAccessEncrypted::MODE_READ, false);
 		memset(key.ptrw(), 0, key.size());
