@@ -24,6 +24,7 @@ PLATFORM=""          # linuxbsd | windows | macos (default: host)
 BUILD_TYPE="editor"  # editor | release | debug-template
 LTO=""               # "" (auto from build type) | none | thin | full
 NO_DEPRECATED=0
+DEV_BUILD=1
 DO_CLEAN=0
 ALL_TEMPLATES=0
 JOBS=""
@@ -43,6 +44,7 @@ Target platform (default: host OS):
 
 Build type (default: --editor):
   --editor               Editor build (dev_build, clang+mold+ccache, no LTO)
+  --no-dev-build         Build the editor without dev_build=yes (smaller/faster, non-dev binary)
   --release              Release export template (production, lto=full, no update check)
   --debug-template       Debug export template (production)
   --all-templates        Build release + debug templates for linux+windows (+macos on a mac)
@@ -124,6 +126,7 @@ while [ $# -gt 0 ]; do
 			shift; [ $# -gt 0 ] || err "--lto needs an argument"
 			LTO="$1" ;;
 		--no-deprecated) NO_DEPRECATED=1 ;;
+		--no-dev-build) DEV_BUILD=0 ;;
 		--jobs)
 			shift; [ $# -gt 0 ] || err "--jobs needs an argument"
 			JOBS="$1" ;;
@@ -162,10 +165,10 @@ build() {
 
 	case "$btype" in
 		editor)
-			args+=(
-				"target=editor"
-				"dev_build=yes"
-			)
+			args+=("target=editor")
+			if [ "$DEV_BUILD" -eq 1 ]; then
+				args+=("dev_build=yes")
+			fi
 			# Fast iteration toolchain only makes sense on a Linux host build.
 			if [ "$plat" = "linuxbsd" ]; then
 				args+=(
