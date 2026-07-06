@@ -35,6 +35,8 @@ USE_PODMAN=0             # build linux inside the old-glibc buildroot container
 PODMAN_IMAGE="localhost/godot-linux:4.7-f43"
 PODMAN_ARCH="x86_64"     # x86_64 | i686 | aarch64 | arm (buildroot SDK arch)
 OSXCROSS_ROOT="${OSXCROSS_ROOT:-}"  # osxcross install root; required (with its target/bin on PATH) for macOS cross-builds
+ENCRYPTION_KEY_FILE=""   # path to a 64-hex-char PCK script encryption key file (e.g. ~/.config/godot/godot.gdkey)
+DEFAULT_ENCRYPTION_KEY_FILE="${XDG_CONFIG_HOME:-$HOME/.config}/godot/godot.gdkey"  # used when neither --encryption-key nor SCRIPT_AES256_ENCRYPTION_KEY is set
 
 # ----------------------------------------------------------------------------------------
 # Helpers
@@ -63,6 +65,15 @@ Options:
   --upload-symbols URL   After the build, POST each new .debugsymbols (keyed by its GNU
                          Build ID) to a GDCrashCatch analyzer at URL/api/symbols. Needs
                          CC_ADMIN_SECRET in the environment.
+  --encryption-key FILE  Bake a PCK script encryption key into the template. FILE must
+                         hold exactly 64 hexadecimal characters (e.g.
+                         ~/.config/godot/godot.gdkey). Must match the key your export
+                         preset encrypts the PCK with, or the game fails to load the .pck
+                         with an MD5/decryption-key mismatch. Resolution order when omitted:
+                         the SCRIPT_AES256_ENCRYPTION_KEY environment variable, then
+                         $XDG_CONFIG_HOME/godot/godot.gdkey (~/.config/godot/godot.gdkey).
+                         If none of those exist, the template is built with no encryption
+                         (zero key).
   --osxcross-sdk SDK     osxcross SDK/toolchain id (e.g. darwin24.4) for cross-compiling
                          macOS from Linux. Requires osxcross's target/bin on PATH.
   --macos-arch ARCH      universal | arm64 | x86_64 (default: universal) for macOS builds.
@@ -104,6 +115,37 @@ detect_jobs() {
 	else
 		echo 4
 	fi
+}
+
+# Resolve the PCK script encryption key, if any, into SCRIPT_AES256_ENCRYPTION_KEY so
+# scons (core/SCsub) bakes it into the template. Precedence: --encryption-key FILE, then
+# an already-exported SCRIPT_AES256_ENCRYPTION_KEY. With neither set, the template builds
+# with no encryption (zero key) and will not load a PCK exported with a real key.
+#
+# The key must be exactly 64 hex chars. Key files (e.g. godot.gdkey) typically carry a
+# trailing newline, so we strip whitespace before validating. We export the cleaned value
+# so the native-scons and podman paths both see the same canonical key.
+resolve_encryption_key() {
+	local key=""
+	if [ -n "$ENCRYPTION_KEY_FILE" ]; then
+		[ -f "$ENCRYPTION_KEY_FILE" ] || err "--encryption-key file not found: $ENCRYPTION_KEY_FILE"
+		key="$(tr -d '[:space:]' < "$ENCRYPTION_KEY_FILE")"
+	elif [ -n "${SCRIPT_AES256_ENCRYPTION_KEY:-}" ]; then
+		key="$(printf '%s' "$SCRIPT_AES256_ENCRYPTION_KEY" | tr -d '[:space:]')"
+	elif [ -f "$DEFAULT_ENCRYPTION_KEY_FILE" ]; then
+		echo ">>> using default encryption key: $DEFAULT_ENCRYPTION_KEY_FILE" >&2
+		key="$(tr -d '[:space:]' < "$DEFAULT_ENCRYPTION_KEY_FILE")"
+	else
+		echo ">>> no encryption key (--encryption-key / SCRIPT_AES256_ENCRYPTION_KEY unset, no $DEFAULT_ENCRYPTION_KEY_FILE); building unencrypted template" >&2
+		return
+	fi
+
+	if ! printf '%s' "$key" | grep -qiE '^[0-9a-f]{64}$'; then
+		err "encryption key must be exactly 64 hexadecimal characters (got ${#key} chars)"
+	fi
+
+	export SCRIPT_AES256_ENCRYPTION_KEY="$key"
+	echo ">>> baking PCK script encryption key into the template" >&2
 }
 
 # Pre-flight toolchain checks for the chosen platform.
@@ -161,6 +203,9 @@ while [ $# -gt 0 ]; do
 		--upload-symbols)
 			shift; [ $# -gt 0 ] || err "--upload-symbols needs a URL"
 			UPLOAD_SYMBOLS_URL="$1" ;;
+		--encryption-key)
+			shift; [ $# -gt 0 ] || err "--encryption-key needs a file path"
+			ENCRYPTION_KEY_FILE="$1" ;;
 		--osxcross-sdk)
 			shift; [ $# -gt 0 ] || err "--osxcross-sdk needs an argument"
 			OSXCROSS_SDK="$1" ;;
@@ -183,6 +228,8 @@ done
 
 [ -n "$PLATFORM" ] || PLATFORM="$(detect_host_platform)"
 [ -n "$JOBS" ] || JOBS="$(detect_jobs)"
+
+resolve_encryption_key
 
 # ----------------------------------------------------------------------------------------
 # Build command assembly
@@ -331,10 +378,19 @@ run_podman_scons() {
 		sdk_dir="arm-godot-linux-gnueabihf_sdk-buildroot"
 	fi
 
+	# The container starts with a clean environment, so the script encryption key resolved
+	# on the host (SCRIPT_AES256_ENCRYPTION_KEY) must be forwarded explicitly with -e or the
+	# template would be built unencrypted (zero key) and fail to load an encrypted PCK.
+	local -a podman_env=()
+	if [ -n "${SCRIPT_AES256_ENCRYPTION_KEY:-}" ]; then
+		podman_env+=("-e" "SCRIPT_AES256_ENCRYPTION_KEY")
+	fi
+
 	echo ">>> podman run (image=$PODMAN_IMAGE, arch=$PODMAN_ARCH) scons $*"
 	podman run --rm \
 		-v "$(pwd)":/root/godot:z \
 		-w /root/godot \
+		"${podman_env[@]}" \
 		"$PODMAN_IMAGE" \
 		bash -c "export PATH=\"/root/${sdk_dir}/bin:\$PATH\" && scons $(printf '%q ' "$@")"
 }
