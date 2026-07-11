@@ -160,13 +160,13 @@ void RenderingContextDriverWebGPU::surface_set_size(SurfaceID p_surface, uint32_
 	}
 }
 
-void RenderingContextDriverWebGPU::surface_set_vsync_mode(SurfaceID p_surface, DisplayServer::VSyncMode p_vsync_mode) {
+void RenderingContextDriverWebGPU::surface_set_vsync_mode(SurfaceID p_surface, DisplayServerEnums::VSyncMode p_vsync_mode) {
 	ERR_FAIL_COND(!surfaces.has(p_surface));
 	surfaces[p_surface].vsync_mode = p_vsync_mode;
 }
 
-DisplayServer::VSyncMode RenderingContextDriverWebGPU::surface_get_vsync_mode(SurfaceID p_surface) const {
-	ERR_FAIL_COND_V(!surfaces.has(p_surface), DisplayServer::VSYNC_ENABLED);
+DisplayServerEnums::VSyncMode RenderingContextDriverWebGPU::surface_get_vsync_mode(SurfaceID p_surface) const {
+	ERR_FAIL_COND_V(!surfaces.has(p_surface), DisplayServerEnums::VSYNC_ENABLED);
 	return surfaces[p_surface].vsync_mode;
 }
 

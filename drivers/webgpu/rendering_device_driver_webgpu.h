@@ -319,7 +319,7 @@ public:
 	// BARRIERS
 	// -----------------------------------------------------------------------
 
-	/// No-op — WebGPU handles synchronization automatically via the command encoder.
+	/// No-op, WebGPU handles synchronization automatically via the command encoder.
 	/// Cross-pass barriers are handled by automatic encoder splitting.
 	virtual void command_pipeline_barrier(
 			CommandBufferID p_cmd_buffer,
@@ -327,7 +327,8 @@ public:
 			BitField<PipelineStageBits> p_dst_stages,
 			VectorView<MemoryAccessBarrier> p_memory_barriers,
 			VectorView<BufferBarrier> p_buffer_barriers,
-			VectorView<TextureBarrier> p_texture_barriers) override final;
+			VectorView<TextureBarrier> p_texture_barriers,
+			VectorView<AccelerationStructureBarrier> p_acceleration_structure_barriers) override final;
 
 	// -----------------------------------------------------------------------
 	// FENCES
@@ -396,6 +397,9 @@ public:
 	virtual DataFormat swap_chain_get_format(SwapChainID p_swap_chain) override final;
 	/// Release a swap chain and its associated render pass.
 	virtual void swap_chain_free(SwapChainID p_swap_chain) override final;
+	/// WebGPU canvas surfaces are always nonlinear sRGB; HDR output is not supported.
+	virtual ColorSpace swap_chain_get_color_space(SwapChainID p_swap_chain) override final { return COLOR_SPACE_REC709_NONLINEAR_SRGB; }
+	virtual bool swap_chain_get_hdr_output_supported(SwapChainID p_swap_chain) override final { return false; }
 
 	// -----------------------------------------------------------------------
 	// FRAMEBUFFER
@@ -567,6 +571,24 @@ public:
 	virtual void command_compute_dispatch_indirect(CommandBufferID p_cmd_buffer, BufferID p_indirect_buffer, uint64_t p_offset) override final;
 	/// Create a compute pipeline with optional specialization constants.
 	virtual PipelineID compute_pipeline_create(ShaderID p_shader, VectorView<PipelineSpecializationConstant> p_specialization_constants) override final;
+
+	// -----------------------------------------------------------------------
+	// RAYTRACING (not supported by WebGPU)
+	// -----------------------------------------------------------------------
+
+	virtual AccelerationStructureID blas_create(VectorView<AccelerationStructureGeometry> p_geometries, BitField<AccelerationStructureFlagBits> p_flags) override final { return AccelerationStructureID(); }
+	virtual AccelerationStructureID tlas_create(uint32_t p_max_instance_count, BitField<AccelerationStructureFlagBits> p_flags) override final { return AccelerationStructureID(); }
+	virtual void acceleration_structure_instance_write(uint8_t *r_driver_instance, const AccelerationStructureInstance &p_instance) override final {}
+	virtual void acceleration_structure_free(AccelerationStructureID p_acceleration_structure) override final {}
+	virtual uint32_t acceleration_structure_get_scratch_size_bytes(AccelerationStructureID p_acceleration_structure) override final { return 0; }
+	virtual RaytracingPipelineID raytracing_pipeline_create(VectorView<PipelineShader> p_shaders, VectorView<uint32_t> p_raygen_shader_indices, VectorView<uint32_t> p_miss_shader_indices, VectorView<HitGroup> p_hit_groups, uint32_t p_max_trace_recursion_depth, ShaderID p_layout_defining_shader) override final { return RaytracingPipelineID(); }
+	virtual void raytracing_pipeline_free(RaytracingPipelineID p_pipeline) override final {}
+	virtual bool raytracing_pipeline_get_shader_group_handles(RaytracingPipelineID p_pipeline, uint32_t p_group_index_offset, VectorView<uint32_t> p_group_indices, uint8_t *r_data, uint32_t p_data_stride_bytes) override final { return false; }
+	virtual void command_build_blas(CommandBufferID p_cmd_buffer, AccelerationStructureID p_acceleration_structure, BufferID p_scratch_buffer) override final {}
+	virtual void command_build_tlas(CommandBufferID p_cmd_buffer, AccelerationStructureID p_acceleration_structure, BufferID p_scratch_buffer, BufferID p_instance_buffer, uint32_t p_instance_offset, uint32_t p_instance_count) override final {}
+	virtual void command_bind_raytracing_pipeline(CommandBufferID p_cmd_buffer, RaytracingPipelineID p_pipeline) override final {}
+	virtual void command_bind_raytracing_uniform_set(CommandBufferID p_cmd_buffer, UniformSetID p_uniform_set, ShaderID p_shader, uint32_t p_set_index) override final {}
+	virtual void command_trace_rays(CommandBufferID p_cmd_buffer, const ShaderBindingTable &p_raygen_sbt, const ShaderBindingTable &p_miss_sbt, const ShaderBindingTable &p_hit_sbt, uint32_t p_width, uint32_t p_height, uint32_t p_depth) override final {}
 
 	// -----------------------------------------------------------------------
 	// QUERIES
