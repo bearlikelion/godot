@@ -33,10 +33,6 @@
 #include "rendering_context_driver_webgpu.h"
 #include "rendering_device_driver_webgpu.h"
 
-// html5_webgpu.h was removed in Emscripten 5.x when USE_WEBGPU was dropped.
-// Device is now created from C++ using the emdawnwebgpu port's Dawn API.
-#include <emscripten/emscripten.h>
-
 RenderingContextDriverWebGPU::RenderingContextDriverWebGPU() {
 }
 
@@ -60,36 +56,59 @@ RenderingContextDriverWebGPU::~RenderingContextDriverWebGPU() {
 }
 
 Error RenderingContextDriverWebGPU::initialize() {
-	// The HTML shell pre-initializes a GPUDevice and stores it in Module.preinitializedWebGPUDevice.
-	// We use the emdawnwebgpu port's WebGPU.importJsDevice() to wrap it in a C WGPUDevice handle.
-	// Note: emdawnwebgpu is a thin JS wrapper around the browser's WebGPU API.
-	// SPIR-V is NOT supported — we use Tint (C++, linked in) for SPIR-V → WGSL
-	// conversion in shader_create_from_container() instead.
-	// Create a WGPUInstance — needed for wgpuInstanceProcessEvents() which
-	// processes async callbacks (buffer map readback, query results, etc.).
+	// Create a WGPUInstance. Needed for surface creation and for delivering
+	// async callbacks (buffer map readback, query results, etc.) via
+	// poll_events(). The backend acquires the adapter/device afterwards.
 	WGPUInstanceDescriptor inst_desc = {};
 	instance = wgpuCreateInstance(&inst_desc);
 	if (!instance) {
 		WARN_PRINT("WebGPU: wgpuCreateInstance returned null — async readback may not work.");
 	}
 
-	device = (WGPUDevice)(uintptr_t)EM_ASM_PTR({
-		var d = Module["preinitializedWebGPUDevice"];
-		if (!d) { return 0; }
-		return WebGPU["importJsDevice"](d);
-	});
-	ERR_FAIL_COND_V_MSG(device == nullptr, ERR_CANT_CREATE, "WebGPU: Failed to get pre-initialized device. Ensure JS shell calls navigator.gpu.requestDevice() before WASM.");
+	Error err = _acquire_device();
+	if (err != OK) {
+		return err;
+	}
+	ERR_FAIL_COND_V_MSG(device == nullptr, ERR_CANT_CREATE, "WebGPU: Backend did not acquire a device.");
 
 	queue = wgpuDeviceGetQueue(device);
 	ERR_FAIL_COND_V_MSG(queue == nullptr, ERR_CANT_CREATE, "WebGPU: Failed to get device queue.");
 
-	// Populate device info.
-	device_info.name = "WebGPU Device";
-	device_info.vendor = Vendor::VENDOR_UNKNOWN;
-	device_info.type = DEVICE_TYPE_INTEGRATED_GPU;
-
-	print_verbose("WebGPU: Device imported from JS successfully.");
 	return OK;
+}
+
+Error RenderingContextDriverWebGPU::_acquire_device() {
+#ifdef WEBGPU_NATIVE_ENABLED
+	// Native device acquisition (wgpu-native) is added with the desktop
+	// backends; implemented in the next milestone.
+	ERR_FAIL_V_MSG(ERR_UNAVAILABLE, "WebGPU: Native device acquisition not implemented yet.");
+#else
+	ERR_FAIL_V_MSG(ERR_UNAVAILABLE, "WebGPU: No backend implementation for device acquisition on this platform.");
+#endif
+}
+
+void RenderingContextDriverWebGPU::poll_events(bool p_wait) {
+#ifdef WEBGPU_NATIVE_ENABLED
+	// On wgpu-native, callbacks are only delivered by wgpuDevicePoll;
+	// wgpuInstanceProcessEvents alone never fires map/work-done callbacks.
+	if (device) {
+		wgpuDevicePoll(device, p_wait ? 1 : 0, nullptr);
+		return;
+	}
+#endif
+	if (instance) {
+		wgpuInstanceProcessEvents(instance);
+	}
+}
+
+RenderingContextDriver::SurfaceID RenderingContextDriverWebGPU::_register_surface(WGPUSurface p_surface) {
+	SurfaceID id = next_surface_id++;
+	Surface &surface = surfaces[id];
+	surface.handle = p_surface;
+	surface.width = 0;
+	surface.height = 0;
+	surface.needs_resize = true;
+	return id;
 }
 
 const RenderingContextDriver::Device &RenderingContextDriverWebGPU::device_get(uint32_t p_device_index) const {
@@ -114,40 +133,8 @@ void RenderingContextDriverWebGPU::driver_free(RenderingDeviceDriver *p_driver) 
 }
 
 RenderingContextDriver::SurfaceID RenderingContextDriverWebGPU::surface_create(const void *p_platform_data) {
-	// p_platform_data is expected to contain a canvas selector string (e.g., "#canvas").
-	// For the web platform, we use the default canvas "#canvas".
-	const char *canvas_selector = "#canvas";
-	if (p_platform_data != nullptr) {
-		// TODO: Extract canvas selector from platform data if provided.
-		// For now, use default.
-	}
-
-	// Emscripten 5.x / emdawnwebgpu renamed this struct.
-	WGPUEmscriptenSurfaceSourceCanvasHTMLSelector canvas_desc = {};
-	canvas_desc.chain.sType = WGPUSType_EmscriptenSurfaceSourceCanvasHTMLSelector;
-	canvas_desc.selector = WGPUStringView{ canvas_selector, WGPU_STRLEN };
-
-	WGPUSurfaceDescriptor surface_desc = {};
-	surface_desc.nextInChain = (WGPUChainedStruct *)&canvas_desc;
-
-	// Note: We need an instance to create a surface. If we don't have one,
-	// create a minimal one. In Emscripten, the instance is a lightweight wrapper.
-	if (instance == nullptr) {
-		WGPUInstanceDescriptor inst_desc = {};
-		instance = wgpuCreateInstance(&inst_desc);
-	}
-
-	WGPUSurface wgpu_surface = wgpuInstanceCreateSurface(instance, &surface_desc);
-	ERR_FAIL_COND_V_MSG(wgpu_surface == nullptr, 0, "WebGPU: Failed to create surface from canvas.");
-
-	SurfaceID id = next_surface_id++;
-	Surface &surface = surfaces[id];
-	surface.handle = wgpu_surface;
-	surface.width = 0;
-	surface.height = 0;
-	surface.needs_resize = true;
-
-	return id;
+	DEV_ASSERT(false && "Surface creation should not be called on the platform-agnostic version of the driver.");
+	return SurfaceID();
 }
 
 void RenderingContextDriverWebGPU::surface_set_size(SurfaceID p_surface, uint32_t p_width, uint32_t p_height) {

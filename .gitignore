@@ -34,6 +34,10 @@ bin
 compile_commands.json
 platform/windows/godot_res.res
 
+# wgpu-native prebuilt dist (headers + static lib) for the native WebGPU driver.
+# Fill from a wgpu-native release zip or a local `cargo build --release`.
+/thirdparty/wgpu-native/
+
 # Ninja build files
 *.ninja
 .ninja/

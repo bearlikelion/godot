@@ -32,7 +32,7 @@
 #define PIXEL_FORMATS_WEBGPU_H
 
 #include "servers/rendering/rendering_device_commons.h"
-#include <webgpu/webgpu.h>
+#include "drivers/webgpu/godot_webgpu.h"
 
 // ============================================================================
 // DataFormat → WGPUTextureFormat mapping table

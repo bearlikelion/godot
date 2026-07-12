@@ -52,7 +52,7 @@
 #endif
 
 #ifdef WEBGPU_ENABLED
-#include "drivers/webgpu/rendering_context_driver_webgpu.h"
+#include "rendering_context_driver_webgpu_web.h"
 #include "servers/rendering/renderer_rd/renderer_compositor_rd.h"
 #endif
 
@@ -1152,7 +1152,7 @@ DisplayServerWeb::DisplayServerWeb(const String &p_rendering_driver, DisplayServ
 		// and imported via Module["preinitializedWebGPUDevice"]. We initialize the
 		// context driver, create the canvas surface, initialize RenderingDevice, and
 		// register the RD compositor so rendering_server->init() finds it.
-		rendering_context = memnew(RenderingContextDriverWebGPU);
+		rendering_context = memnew(RenderingContextDriverWebGPUWeb);
 		if (rendering_context->initialize() != OK) {
 			memdelete(rendering_context);
 			rendering_context = nullptr;

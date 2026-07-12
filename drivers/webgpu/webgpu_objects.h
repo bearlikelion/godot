@@ -34,7 +34,7 @@
 
 #include "servers/rendering/rendering_device_driver.h"
 
-#include <webgpu/webgpu.h>
+#include "drivers/webgpu/godot_webgpu.h"
 
 using RDD = RenderingDeviceDriver;
 

@@ -36,29 +36,21 @@
 #include "pixel_formats_webgpu.h"
 #include "spirv_preprocess.h"
 
+#include "core/os/os.h"
 #include "core/templates/hash_map.h"
 #include "core/templates/hashfuncs.h"
 
 #include "tint_wrapper.h"
 
-#include <webgpu/webgpu.h>
-#include <emscripten/emscripten.h>
+#include "godot_webgpu.h"
+
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <vector>
 
-// Define WEBGPU_VERBOSE to enable diagnostic console.log prints in the browser.
-// These are disabled by default for production builds.
-// #define WEBGPU_VERBOSE
-
-#ifdef WEBGPU_VERBOSE
-#define WEBGPU_DIAG(...) EM_ASM(__VA_ARGS__)
-#define WEBGPU_DIAG_INT(...) EM_ASM_INT(__VA_ARGS__)
-#else
-#define WEBGPU_DIAG(...) ((void)0)
-#define WEBGPU_DIAG_INT(...) 0
-#endif
+// WEBGPU_DIAG / WEBGPU_DIAG_INT and the WEBGPU_VERBOSE toggle live in
+// godot_webgpu.h (they are EM_ASM based and web-only).
 
 // Forward declaration for timestamp readback callback (defined below command_timestamp_query_pool_reset).
 static void _timestamp_readback_callback(WGPUMapAsyncStatus p_status, WGPUStringView p_message, void *p_userdata1, void *p_userdata2);
@@ -609,6 +601,7 @@ Error RenderingDeviceDriverWebGPU::initialize(uint32_t p_device_index, uint32_t 
 	// Create shader container format.
 	shader_container_format = memnew(RenderingShaderContainerFormatWebGPU);
 
+#ifdef __EMSCRIPTEN__
 	// Always-on: uncaptured error listener so WebGPU validation errors appear
 	// in the browser console before any abort(). Lightweight — no extra API calls.
 	MAIN_THREAD_EM_ASM({
@@ -626,6 +619,7 @@ Error RenderingDeviceDriverWebGPU::initialize(uint32_t p_device_index, uint32_t 
 			d._lostPatched = true;
 		}
 	});
+#endif // __EMSCRIPTEN__
 
 	// Install main-thread JS diagnostic patches early — as soon as the device is
 	// ready, before any pipelines are created. This ensures we intercept EVERY
@@ -637,7 +631,7 @@ Error RenderingDeviceDriverWebGPU::initialize(uint32_t p_device_index, uint32_t 
 	// doubles every render-pipeline compile, and the per-module getCompilationInfo()
 	// forces a sync compile path. On shiny_gen with ~383 shaders, leaving these on
 	// adds ~12s to startup. Re-enable by uncommenting #define WEBGPU_VERBOSE above.
-#ifdef WEBGPU_VERBOSE
+#if defined(WEBGPU_VERBOSE) && defined(__EMSCRIPTEN__)
 	MAIN_THREAD_EM_ASM({
 		var d = Module['preinitializedWebGPUDevice'];
 		if (!d) { console.error('[DIAG-PATCH] preinitializedWebGPUDevice missing'); return; }
@@ -798,20 +792,33 @@ void RenderingDeviceDriverWebGPU::_check_capabilities() {
 	// texture-formats-tier1: adds storage binding support for r8unorm, rg8unorm, etc.
 	// The emdawnwebgpu 4.0.10 header lacks the WGPUFeatureName enum value for this
 	// feature, so query the JS device object directly.
+#ifdef __EMSCRIPTEN__
 	has_texture_formats_tier1 = (bool)EM_ASM_INT({
 		var d = Module['preinitializedWebGPUDevice'];
 		return (d && d.features && d.features.has('texture-formats-tier1')) ? 1 : 0;
 	});
+#else
+	// Not exposed by wgpu-native v29; the format fallbacks handle its absence.
+	has_texture_formats_tier1 = false;
+#endif
 	if (has_texture_formats_tier1) {
 		print_verbose("WebGPU: texture-formats-tier1 feature is available — r8/rg8 storage formats supported natively.");
 	}
 
 	// readonly-and-readwrite-storage-textures: allows read and read_write access
 	// modes on storage textures. Without this, only write-only is valid.
+#ifdef __EMSCRIPTEN__
 	has_rw_storage_textures = (bool)EM_ASM_INT({
 		var d = Module['preinitializedWebGPUDevice'];
 		return (d && d.features && d.features.has('readonly-and-readwrite-storage-textures')) ? 1 : 0;
 	});
+#else
+	// wgpu (Naga/WGSL) supports read and read_write storage texture access
+	// modes natively, but there is no standard feature bit for it in the
+	// header generation wgpu-native v29 pins. Stay conservative and use the
+	// same split path as browsers without the feature.
+	has_rw_storage_textures = false;
+#endif
 	if (has_rw_storage_textures) {
 		print_verbose("WebGPU: readonly-and-readwrite-storage-textures feature is available.");
 	} else {
@@ -1050,10 +1057,14 @@ uint8_t *RenderingDeviceDriverWebGPU::buffer_map(BufferID p_buffer) {
 			memset(buf->shadow_map, 0, buf->size);
 		}
 
-		// Try to deliver pending callbacks.
-		WGPUInstance inst = context_driver ? context_driver->get_instance() : nullptr;
-		if (inst) {
-			wgpuInstanceProcessEvents(inst);
+		// Try to deliver pending callbacks. On native this blocks until
+		// submitted GPU work (and therefore the pending map) completes.
+		if (context_driver) {
+#ifdef __EMSCRIPTEN__
+			context_driver->poll_events(false);
+#else
+			context_driver->poll_events(true);
+#endif
 		}
 
 		// If the callback already fired, shadow has data.
@@ -1989,8 +2000,14 @@ Vector<uint8_t> RenderingDeviceDriverWebGPU::texture_get_data(TextureID p_textur
 	// the JS level even though the C callback hasn't been delivered yet (same
 	// trick as buffer_map). If mapped, copy data into shadow and mark complete.
 	if (entry && !entry->map_complete && entry->map_pending) {
-		WGPUInstance inst = context_driver ? context_driver->get_instance() : nullptr;
-		if (inst) wgpuInstanceProcessEvents(inst);
+		if (context_driver) {
+#ifdef __EMSCRIPTEN__
+			context_driver->poll_events(false);
+#else
+			// Block until the submitted copy and the map complete.
+			context_driver->poll_events(true);
+#endif
+		}
 		if (!entry->map_complete) {
 			WGPUBufferMapState state = wgpuBufferGetMapState(entry->staging);
 			if (state == WGPUBufferMapState_Mapped) {
@@ -2695,15 +2712,15 @@ Error RenderingDeviceDriverWebGPU::fence_wait(FenceID p_fence) {
 	WGFence *fence = (WGFence *)(p_fence.id);
 	ERR_FAIL_NULL_V(fence, ERR_INVALID_PARAMETER);
 
+#ifdef __EMSCRIPTEN__
 	// In the browser's single-threaded model, GPU work submitted via
 	// wgpuQueueSubmit completes asynchronously.  The emdawnwebgpu
 	// implementation resolves AllowSpontaneous callbacks during
 	// wgpuInstanceProcessEvents.  Poll the instance to allow the
 	// work-done callback (registered in command_queue_execute_and_present)
 	// to fire and set fence->signaled = true.
-	WGPUInstance inst = context_driver ? context_driver->get_instance() : nullptr;
-	if (inst) {
-		wgpuInstanceProcessEvents(inst);
+	if (context_driver) {
+		context_driver->poll_events(false);
 	}
 
 	// On single-threaded WASM, the callback may not fire until the next
@@ -2715,6 +2732,17 @@ Error RenderingDeviceDriverWebGPU::fence_wait(FenceID p_fence) {
 	if (!fence->signaled) {
 		fence->signaled = true;
 	}
+#else
+	// Native: a real blocking wait. wgpuDevicePoll(wait=true) blocks until
+	// submitted GPU work completes, delivering the work-done callback that
+	// signals the fence. Bounded to avoid an infinite loop if the callback
+	// was never registered (fence submitted with no command buffers).
+	uint32_t guard = 0;
+	while (!fence->signaled && fence->work_done_pending && guard++ < 1000) {
+		context_driver->poll_events(true);
+	}
+	fence->signaled = true;
+#endif
 	return OK;
 }
 
@@ -2784,7 +2812,7 @@ Error RenderingDeviceDriverWebGPU::command_queue_execute_and_present(CommandQueu
 
 		wgpuQueueSubmit(queue, wgpu_cmd_buffers.size(), wgpu_cmd_buffers.ptr());
 		// Diagnostic: log submit count for the first few frames.
-#ifdef WEBGPU_VERBOSE
+#if defined(WEBGPU_VERBOSE) && defined(__EMSCRIPTEN__)
 		static int _submit_log = 0;
 		if (_submit_log < 10) {
 			EM_ASM({ console.log('[DIAG-SUBMIT] frame=' + $0 + ' cmds=' + $1); },
@@ -2932,16 +2960,15 @@ void RenderingDeviceDriverWebGPU::command_buffer_end(CommandBufferID p_cmd_buffe
 		WGPUBufferMapState map_state = wgpuBufferGetMapState(pool->readback_buffer);
 		if (map_state != WGPUBufferMapState_Unmapped) {
 			// Try to drain pending callbacks first.
-			WGPUInstance inst = context_driver ? context_driver->get_instance() : nullptr;
-			if (inst) {
-				wgpuInstanceProcessEvents(inst);
+			if (context_driver) {
+				context_driver->poll_events(false);
 			}
 			map_state = wgpuBufferGetMapState(pool->readback_buffer);
 
 			if (map_state != WGPUBufferMapState_Unmapped) {
 				wgpuBufferUnmap(pool->readback_buffer);
-				if (inst) {
-					wgpuInstanceProcessEvents(inst);
+				if (context_driver) {
+					context_driver->poll_events(false);
 				}
 				map_state = wgpuBufferGetMapState(pool->readback_buffer);
 			}
@@ -4142,7 +4169,7 @@ RDD::ShaderID RenderingDeviceDriverWebGPU::shader_create_from_container(const Re
 			}
 		}
 
-		free(wgsl_str); // Free the EM_ASM-allocated string.
+		free(wgsl_str); // Free the C string allocated by the WGSL conversion.
 		if (mod == nullptr) {
 			error_text = vformat("WebGPU: wgpuDeviceCreateShaderModule failed for stage %d.", (int)s.shader_stage);
 			break;
@@ -6816,7 +6843,7 @@ void RenderingDeviceDriverWebGPU::command_begin_render_pass(CommandBufferID p_cm
 
 	// --- Begin render pass ---
 	// --- Diagnostic: verify swap chain view maps to correct JS object ---
-#ifdef WEBGPU_VERBOSE
+#if defined(WEBGPU_VERBOSE) && defined(__EMSCRIPTEN__)
 	if (rp->is_swap_chain_pass && color_attachments.size() > 0) {
 		static int _sc_view_log = 0;
 		if (_sc_view_log < 5) {
@@ -8601,13 +8628,18 @@ void RenderingDeviceDriverWebGPU::begin_segment(uint32_t p_frame_index, uint32_t
 
 	// Performance counter tracking (always-on, 1 log/sec is negligible overhead).
 	perf.frames_since_log++;
+#ifdef __EMSCRIPTEN__
 	double now = EM_ASM_DOUBLE({ return performance.now(); });
+#else
+	double now = (double)OS::get_singleton()->get_ticks_usec() / 1000.0;
+#endif
 	if (perf.last_log_time == 0) {
 		perf.last_log_time = now;
 	} else if (now - perf.last_log_time >= 1000.0) {
 		double elapsed = (now - perf.last_log_time) / 1000.0;
 		uint32_t fps = (uint32_t)(perf.frames_since_log / elapsed);
 		uint32_t f = perf.frames_since_log > 0 ? perf.frames_since_log : 1;
+#ifdef __EMSCRIPTEN__
 		EM_ASM({
 			console.log('[PERF] fps=' + $0 +
 				' draws/f=' + $1 +
@@ -8621,6 +8653,13 @@ void RenderingDeviceDriverWebGPU::begin_segment(uint32_t p_frame_index, uint32_t
 				perf.push_constant_writes / f, perf.render_passes / f,
 				perf.set_vertex_buffer_calls / f, perf.first_instance_draws / f,
 				perf.ring_overflows / f);
+#else
+		print_verbose(vformat("WebGPU: [PERF] fps=%d draws/f=%d SetBG/f=%d PC/f=%d RP/f=%d SetVB/f=%d FI/f=%d RingOF/f=%d",
+				fps, perf.draw_calls / f, perf.set_bind_group_calls / f,
+				perf.push_constant_writes / f, perf.render_passes / f,
+				perf.set_vertex_buffer_calls / f, perf.first_instance_draws / f,
+				perf.ring_overflows / f));
+#endif
 		perf.reset();
 		perf.frames_since_log = 0;
 		perf.last_log_time = now;

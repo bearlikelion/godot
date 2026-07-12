@@ -34,9 +34,17 @@
 
 #include "servers/rendering/rendering_context_driver.h"
 
-#include <webgpu/webgpu.h>
+#include "godot_webgpu.h"
 
+// Backend-agnostic base for the WebGPU context driver. Owns the instance,
+// adapter, device, queue, and surface bookkeeping. Device acquisition and
+// surface creation are backend/platform specific:
+// - Web: RenderingContextDriverWebGPUWeb (platform/web) imports the JS
+//   pre-initialized device and creates canvas surfaces.
+// - Native (wgpu-native): platform subclasses create window surfaces; the
+//   device is requested from the instance in the shared native path.
 class RenderingContextDriverWebGPU : public RenderingContextDriver {
+protected:
 	WGPUInstance instance = nullptr;
 	WGPUAdapter adapter = nullptr;
 	WGPUDevice device = nullptr;
@@ -55,6 +63,13 @@ class RenderingContextDriverWebGPU : public RenderingContextDriver {
 	HashMap<SurfaceID, Surface> surfaces;
 	SurfaceID next_surface_id = 1;
 
+	// Acquire adapter + device into `adapter`/`device` and fill `device_info`.
+	// Called from initialize() after the instance exists.
+	virtual Error _acquire_device();
+
+	// Register a backend-created surface and return its SurfaceID.
+	SurfaceID _register_surface(WGPUSurface p_surface);
+
 public:
 	RenderingContextDriverWebGPU();
 	virtual ~RenderingContextDriverWebGPU() override;
@@ -67,7 +82,9 @@ public:
 	virtual bool device_supports_present(uint32_t p_device_index, SurfaceID p_surface) const override final;
 	virtual RenderingDeviceDriver *driver_create() override final;
 	virtual void driver_free(RenderingDeviceDriver *p_driver) override final;
-	virtual SurfaceID surface_create(const void *p_platform_data) override final;
+	// Overridden by the per-platform subclasses (web canvas, X11, Wayland,
+	// HWND, Metal); the base implementation asserts.
+	virtual SurfaceID surface_create(const void *p_platform_data) override;
 	virtual void surface_set_size(SurfaceID p_surface, uint32_t p_width, uint32_t p_height) override final;
 	virtual void surface_set_vsync_mode(SurfaceID p_surface, DisplayServerEnums::VSyncMode p_vsync_mode) override final;
 	virtual DisplayServerEnums::VSyncMode surface_get_vsync_mode(SurfaceID p_surface) const override final;
@@ -93,7 +110,15 @@ public:
 	WGPUDevice get_device() const { return device; }
 	WGPUQueue get_queue() const { return queue; }
 	WGPUInstance get_instance() const { return instance; }
+	WGPUAdapter get_adapter() const { return adapter; }
 	WGPUSurface surface_get_handle(SurfaceID p_surface) const;
+
+	// Deliver pending async callbacks (buffer maps, work-done, ...).
+	// Web: wgpuInstanceProcessEvents (callbacks resolve on the browser tick).
+	// Native: wgpuDevicePoll; with p_wait the call blocks until submitted
+	// GPU work completes. ProcessEvents alone never delivers map/work-done
+	// callbacks on wgpu-native.
+	void poll_events(bool p_wait = false);
 };
 
 #endif // WEBGPU_ENABLED

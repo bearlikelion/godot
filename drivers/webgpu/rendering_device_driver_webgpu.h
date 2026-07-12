@@ -37,7 +37,7 @@
 #include "servers/rendering/rendering_device_driver.h"
 #include "core/templates/hash_map.h"
 
-#include <webgpu/webgpu.h>
+#include "drivers/webgpu/godot_webgpu.h"
 
 class RenderingContextDriverWebGPU;
 class RenderingShaderContainerFormatWebGPU;
