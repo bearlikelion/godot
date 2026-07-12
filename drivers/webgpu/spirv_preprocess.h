@@ -62,6 +62,13 @@ Vector<uint8_t> inline_functions(const Vector<uint8_t> &p_bytes);
 // storage textures keep the decoration.
 Vector<uint8_t> strip_nonreadable_buffer_decoration(const Vector<uint8_t> &p_bytes);
 
+// Replace reads of the HelperInvocation builtin (gl_HelperInvocation) with
+// constant false. WGSL has no equivalent and Tint's SPIR-V reader aborts on
+// it. Helper lanes then behave like regular lanes for the guarded logic,
+// which is acceptable for its uses in Godot's shaders (avoiding side
+// effects in helper invocations).
+Vector<uint8_t> replace_helper_invocation(const Vector<uint8_t> &p_bytes);
+
 // Evaluate OpSpecConstantOp instructions with default values and replace
 // them with regular OpConstant instructions. Also converts OpSpecConstant*
 // to their non-specialization equivalents and strips SpecId decorations.

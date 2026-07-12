@@ -1187,6 +1187,43 @@ Vector<uint8_t> split_combined_samplers(const Vector<uint8_t> &p_bytes) {
 		load_splits.insert(kv.key, ids);
 	}
 
+	// SPIR-V requires OpSampledImage results to be consumed in the same
+	// basic block. The combined OpLoad can be in a different block than its
+	// consumers (common after function inlining), so a fresh OpSampledImage
+	// is materialized immediately before every consumer instead of relying
+	// on the one emitted at the load site. Only known sampled-image
+	// consumers are scanned (operand word 3), so literal words can never be
+	// misread as ids.
+	struct ConsumerFixup {
+		uint32_t new_id;
+		uint32_t load_result_id;
+	};
+	HashMap<uint32_t, ConsumerFixup> consumer_fixups; // instruction position -> fixup
+	{
+		auto consumes_sampled_image = [](uint16_t p_op) {
+			// OpImageSample*, OpImageGather, OpImageDrefGather, OpImage,
+			// OpImageQueryLod, OpCopyObject.
+			return (p_op >= 88 && p_op <= 95) || p_op == 97 || p_op == 98 || p_op == OP_IMAGE || p_op == 104 || p_op == OP_COPY_OBJECT;
+		};
+		uint32_t scan_pos = 5;
+		while (scan_pos < total_words) {
+			uint32_t w0 = read_word(data, len, scan_pos);
+			uint32_t wc = (w0 >> 16);
+			uint16_t op = (uint16_t)(w0 & 0xFFFF);
+			if (wc == 0 || scan_pos + wc > total_words) {
+				break;
+			}
+			if (consumes_sampled_image(op) && wc >= 4) {
+				uint32_t operand = read_word(data, len, scan_pos + 3);
+				const uint32_t *cv = combined_loads.getptr(operand);
+				if (cv && !splits[*cv].is_multisampled) {
+					consumer_fixups.insert(scan_pos, ConsumerFixup{ alloc_id(), operand });
+				}
+			}
+			scan_pos += wc;
+		}
+	}
+
 	// --- Second pass: rewrite ---
 	Vector<uint8_t> out;
 
@@ -1456,6 +1493,31 @@ Vector<uint8_t> split_combined_samplers(const Vector<uint8_t> &p_bytes) {
 				push_word(out, result_type);
 				push_word(out, result_id);
 				push_word(out, sampled_image_id); // Now points to an image load, not sampled-image.
+				pos += wc;
+				continue;
+			}
+		}
+
+		// Materialize a same-block OpSampledImage before consumers of a
+		// combined load whose original recombination may be in another block.
+		{
+			const ConsumerFixup *fixup = consumer_fixups.getptr(pos);
+			if (fixup) {
+				const SplitInfo &split = splits[combined_loads[fixup->load_result_id]];
+				const LoadSplitIds &lids = load_splits[fixup->load_result_id];
+
+				// OpSampledImage %SampledImageType %new_id %si_load %samp_load
+				push_word(out, (5u << 16) | (uint32_t)OP_SAMPLED_IMAGE);
+				push_word(out, split.sampled_image_type_id);
+				push_word(out, fixup->new_id);
+				push_word(out, lids.si_load_id);
+				push_word(out, lids.samp_load_id);
+
+				// Copy the consumer with its sampled-image operand redirected.
+				for (uint32_t i = 0; i < wc; i++) {
+					uint32_t word = read_word(data, len, pos + i);
+					push_word(out, i == 3 ? fixup->new_id : word);
+				}
 				pos += wc;
 				continue;
 			}
@@ -1976,6 +2038,135 @@ Vector<uint8_t> strip_restrict_decoration(const Vector<uint8_t> &p_bytes) {
 		if (!skip) {
 			append_bytes(out, data, pos * 4, wc * 4);
 		}
+		pos += wc;
+	}
+
+	return out;
+}
+
+// ---- replace_helper_invocation ----
+
+Vector<uint8_t> replace_helper_invocation(const Vector<uint8_t> &p_bytes) {
+	const int64_t len = p_bytes.size();
+	const uint32_t total_words = (uint32_t)(len / 4);
+
+	if (total_words < 5) {
+		return p_bytes;
+	}
+
+	const uint8_t *data = p_bytes.ptr();
+	static constexpr uint32_t DECO_BUILTIN_LOCAL = 11;
+	static constexpr uint32_t BUILTIN_HELPER_INVOCATION = 23;
+
+	// Pass 1: find the HelperInvocation variable, OpTypeBool, and an
+	// existing OpConstantFalse of that type.
+	uint32_t helper_var = 0;
+	uint32_t bool_type = 0;
+	uint32_t false_const = 0;
+
+	uint32_t pos = 5;
+	while (pos < total_words) {
+		uint32_t w0 = read_word(data, len, pos);
+		uint32_t wc = (w0 >> 16);
+		uint16_t op = (uint16_t)(w0 & 0xFFFF);
+		if (wc == 0 || pos + wc > total_words) {
+			break;
+		}
+		if (op == OP_DECORATE && wc >= 4 && read_word(data, len, pos + 2) == DECO_BUILTIN_LOCAL && read_word(data, len, pos + 3) == BUILTIN_HELPER_INVOCATION) {
+			helper_var = read_word(data, len, pos + 1);
+		}
+		if (op == OP_TYPE_BOOL && wc >= 2) {
+			bool_type = read_word(data, len, pos + 1);
+		}
+		if (op == OP_CONSTANT_FALSE && wc >= 3 && read_word(data, len, pos + 1) == bool_type) {
+			false_const = read_word(data, len, pos + 2);
+		}
+		pos += wc;
+	}
+
+	if (helper_var == 0 || bool_type == 0) {
+		return p_bytes;
+	}
+
+	// Allocate an OpConstantFalse if the module has none.
+	uint32_t next_id = read_word(data, len, 3);
+	bool inject_false = false;
+	if (false_const == 0) {
+		false_const = next_id++;
+		inject_false = true;
+	}
+
+	// Pass 2: rewrite.
+	Vector<uint8_t> out;
+	append_bytes(out, data, 0, 12);
+	push_word(out, next_id);
+	push_word(out, read_word(data, len, 4));
+
+	pos = 5;
+	while (pos < total_words) {
+		uint32_t w0 = read_word(data, len, pos);
+		uint32_t wc = (w0 >> 16);
+		uint16_t op = (uint16_t)(w0 & 0xFFFF);
+		if (wc == 0 || pos + wc > total_words) {
+			break;
+		}
+
+		// Strip the builtin decoration, names, and the variable itself.
+		if (op == OP_DECORATE && wc >= 3 && read_word(data, len, pos + 1) == helper_var) {
+			pos += wc;
+			continue;
+		}
+		if (op == OP_NAME && wc >= 2 && read_word(data, len, pos + 1) == helper_var) {
+			pos += wc;
+			continue;
+		}
+		if (op == OP_VARIABLE && wc >= 3 && read_word(data, len, pos + 2) == helper_var) {
+			pos += wc;
+			continue;
+		}
+
+		// Remove the variable from entry point interface lists.
+		if (op == OP_ENTRY_POINT) {
+			Vector<uint32_t> words;
+			for (uint32_t i = 1; i < wc; i++) {
+				uint32_t w = read_word(data, len, pos + i);
+				// Interface ids only appear after the name string; the
+				// variable id cannot collide with the execution model or
+				// the entry id, and matching string words is unlikely
+				// enough for a builtin var id (fresh high id from glslang).
+				if (i >= 3 && w == helper_var) {
+					continue;
+				}
+				words.push_back(w);
+			}
+			push_word(out, (uint32_t)((words.size() + 1) << 16) | (uint32_t)OP_ENTRY_POINT);
+			for (int i = 0; i < words.size(); i++) {
+				push_word(out, words[i]);
+			}
+			pos += wc;
+			continue;
+		}
+
+		// Replace loads of the variable with constant false.
+		if (op == OP_LOAD && wc >= 4 && read_word(data, len, pos + 3) == helper_var) {
+			push_word(out, (4u << 16) | (uint32_t)OP_COPY_OBJECT);
+			push_word(out, read_word(data, len, pos + 1));
+			push_word(out, read_word(data, len, pos + 2));
+			push_word(out, false_const);
+			pos += wc;
+			continue;
+		}
+
+		append_bytes(out, data, pos * 4, wc * 4);
+
+		// Inject the OpConstantFalse right after OpTypeBool.
+		if (inject_false && op == OP_TYPE_BOOL && wc >= 2 && read_word(data, len, pos + 1) == bool_type) {
+			push_word(out, (3u << 16) | (uint32_t)OP_CONSTANT_FALSE);
+			push_word(out, bool_type);
+			push_word(out, false_const);
+			inject_false = false;
+		}
+
 		pos += wc;
 	}
 

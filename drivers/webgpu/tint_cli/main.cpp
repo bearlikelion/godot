@@ -78,6 +78,7 @@ static std::string convert_spirv_to_wgsl(const std::vector<uint8_t> &p_spv_bytes
 	run(spirv_preprocess::negate_position_y);
 	run(spirv_preprocess::strip_restrict_decoration);
 	run(spirv_preprocess::strip_memory_barrier);
+	run(spirv_preprocess::replace_helper_invocation);
 	run(spirv_preprocess::fix_nonfinite_literals);
 	run(spirv_preprocess::flatten_binding_arrays);
 	run(spirv_preprocess::strip_nonreadable_buffer_decoration);

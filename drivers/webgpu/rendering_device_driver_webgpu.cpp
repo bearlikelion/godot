@@ -182,6 +182,7 @@ static char *_translate_spirv_to_wgsl(const uint8_t *p_spv_ptr, int p_spv_size) 
 	spv = spirv_preprocess::negate_position_y(spv);
 	spv = spirv_preprocess::strip_restrict_decoration(spv);
 	spv = spirv_preprocess::strip_memory_barrier(spv);
+	spv = spirv_preprocess::replace_helper_invocation(spv);
 	spv = spirv_preprocess::fix_nonfinite_literals(spv);
 	spv = spirv_preprocess::flatten_binding_arrays(spv);
 	spv = spirv_preprocess::strip_nonreadable_buffer_decoration(spv);

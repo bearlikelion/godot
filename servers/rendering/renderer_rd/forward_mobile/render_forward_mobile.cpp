@@ -31,6 +31,7 @@
 #include "render_forward_mobile.h"
 
 #include "core/config/project_settings.h"
+#include "core/os/os.h"
 #include "servers/rendering/renderer_rd/framebuffer_cache_rd.h"
 #include "servers/rendering/renderer_rd/storage_rd/light_storage.h"
 #include "servers/rendering/renderer_rd/storage_rd/mesh_storage.h"
@@ -893,9 +894,12 @@ void RenderForwardMobile::_render_scene(RenderDataRD *p_render_data, const Color
 	RendererRD::MaterialStorage::Samplers samplers;
 	bool hdr_render_target = false;
 
-#ifdef WEB_ENABLED
-	// WebGPU does not support subpasses or input attachments.
-	using_subpass_post_process = false;
+#ifdef WEBGPU_ENABLED
+	// WebGPU does not support subpasses or input attachments (the driver
+	// flattens each subpass into its own render pass).
+	if (OS::get_singleton()->get_current_rendering_driver_name() == "webgpu") {
+		using_subpass_post_process = false;
+	}
 #endif
 
 	RSE::ViewportMSAA msaa = rb->get_msaa_3d();

@@ -20,6 +20,46 @@
 #include <string>
 #include <vector>
 
+#ifndef __EMSCRIPTEN__
+#include <csetjmp>
+#include <csignal>
+
+// Tint internal compiler errors (TINT_ICE / TINT_UNIMPLEMENTED / failed
+// TINT_ASSERT) print a message and then __builtin_trap(), killing the
+// process. On native we intercept the resulting SIGILL/SIGTRAP/SIGABRT
+// while a conversion is in flight and long-jump back, turning process
+// death into a per-shader conversion failure. Leaks whatever Tint had
+// allocated for that conversion, which is acceptable for a rare error
+// path. On the web the trap remains fatal (wasm `unreachable` cannot be
+// intercepted).
+static thread_local sigjmp_buf _tint_ice_jmp;
+static thread_local volatile bool _tint_ice_armed = false;
+
+static void _tint_trap_handler(int p_sig) {
+	if (_tint_ice_armed) {
+		_tint_ice_armed = false;
+		siglongjmp(_tint_ice_jmp, 1);
+	}
+	// Not a guarded Tint conversion: restore default disposition and re-raise.
+	signal(p_sig, SIG_DFL);
+	raise(p_sig);
+}
+
+static void _install_trap_handlers() {
+	static bool installed = false;
+	if (installed) {
+		return;
+	}
+	installed = true;
+	struct sigaction sa = {};
+	sa.sa_handler = _tint_trap_handler;
+	sigemptyset(&sa.sa_mask);
+	sigaction(SIGILL, &sa, nullptr);
+	sigaction(SIGTRAP, &sa, nullptr);
+	sigaction(SIGABRT, &sa, nullptr);
+}
+#endif // !__EMSCRIPTEN__
+
 void tint_wrapper_initialize() {
 	tint::Initialize();
 }
@@ -36,7 +76,29 @@ char *tint_wrapper_spirv_to_wgsl(const uint32_t *p_spirv_words, size_t p_word_co
 	// This inserts `diagnostic(off, derivative_uniformity)` in the output.
 	wgsl_options.allow_non_uniform_derivatives = true;
 
+#ifndef __EMSCRIPTEN__
+	_install_trap_handlers();
+	if (sigsetjmp(_tint_ice_jmp, 1) != 0) {
+		// A Tint internal compiler error trapped; surface it as a failure.
+		if (r_error) {
+			const char *msg = "Tint internal compiler error (trapped); shader cannot be converted to WGSL";
+			char *err = (char *)malloc(strlen(msg) + 1);
+			if (err) {
+				strcpy(err, msg);
+			}
+			*r_error = err;
+		}
+		return nullptr;
+	}
+	_tint_ice_armed = true;
+#endif
+
 	auto result = tint::SpirvToWgsl(words, wgsl_options);
+
+#ifndef __EMSCRIPTEN__
+	_tint_ice_armed = false;
+#endif
+
 	if (result != tint::Success) {
 		if (r_error) {
 			const std::string &reason = result.Failure().reason;
