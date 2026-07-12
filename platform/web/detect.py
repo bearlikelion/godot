@@ -339,6 +339,13 @@ def configure(env: "SConsEnvironment"):
     # us since we don't know requirements at compile-time.
     env.Append(LINKFLAGS=["-sALLOW_MEMORY_GROWTH=1"])
 
+    # Emscripten 6.x defaults to growing memory via resizable ArrayBuffers.
+    # Firefox's TextDecoder rejects views over resizable ArrayBuffers, which
+    # breaks UTF8ToString during startup (e.g. while loading dlink side
+    # modules). Grow by replacing the buffer instead, which every browser
+    # handles.
+    env.Append(LINKFLAGS=["-sGROWABLE_ARRAYBUFFERS=0"])
+
     # Ensure malloc returns NULL on failure instead of aborting. Emscripten
     # sets this automatically when ALLOW_MEMORY_GROWTH=1, but being explicit
     # prevents regressions if the default ever changes and documents intent.
