@@ -77,11 +77,172 @@ Error RenderingContextDriverWebGPU::initialize() {
 	return OK;
 }
 
+#ifdef WEBGPU_NATIVE_ENABLED
+
+static void _wgpu_log_callback(WGPULogLevel p_level, WGPUStringView p_message, void *p_userdata) {
+	String msg = String::utf8(p_message.data, p_message.length);
+	switch (p_level) {
+		case WGPULogLevel_Error:
+			ERR_PRINT(vformat("wgpu: %s", msg));
+			break;
+		case WGPULogLevel_Warn:
+			WARN_PRINT(vformat("wgpu: %s", msg));
+			break;
+		default:
+			print_verbose(vformat("wgpu: %s", msg));
+			break;
+	}
+}
+
+static void _wgpu_uncaptured_error_callback(WGPUDevice const *p_device, WGPUErrorType p_type, WGPUStringView p_message, void *p_userdata1, void *p_userdata2) {
+	ERR_PRINT(vformat("WebGPU uncaptured error (type %d): %s", (int)p_type, String::utf8(p_message.data, p_message.length)));
+}
+
+static void _wgpu_device_lost_callback(WGPUDevice const *p_device, WGPUDeviceLostReason p_reason, WGPUStringView p_message, void *p_userdata1, void *p_userdata2) {
+	if (p_reason == WGPUDeviceLostReason_Destroyed) {
+		return; // Expected on shutdown.
+	}
+	ERR_PRINT(vformat("WebGPU device lost (reason %d): %s", (int)p_reason, String::utf8(p_message.data, p_message.length)));
+}
+
+struct WebGPUAdapterRequest {
+	WGPUAdapter adapter = nullptr;
+	bool done = false;
+	String error;
+};
+
+static void _wgpu_request_adapter_callback(WGPURequestAdapterStatus p_status, WGPUAdapter p_adapter, WGPUStringView p_message, void *p_userdata1, void *p_userdata2) {
+	WebGPUAdapterRequest *req = (WebGPUAdapterRequest *)p_userdata1;
+	req->done = true;
+	if (p_status == WGPURequestAdapterStatus_Success) {
+		req->adapter = p_adapter;
+	} else {
+		req->error = String::utf8(p_message.data, p_message.length);
+	}
+}
+
+struct WebGPUDeviceRequest {
+	WGPUDevice device = nullptr;
+	bool done = false;
+	String error;
+};
+
+static void _wgpu_request_device_callback(WGPURequestDeviceStatus p_status, WGPUDevice p_device, WGPUStringView p_message, void *p_userdata1, void *p_userdata2) {
+	WebGPUDeviceRequest *req = (WebGPUDeviceRequest *)p_userdata1;
+	req->done = true;
+	if (p_status == WGPURequestDeviceStatus_Success) {
+		req->device = p_device;
+	} else {
+		req->error = String::utf8(p_message.data, p_message.length);
+	}
+}
+
+#endif // WEBGPU_NATIVE_ENABLED
+
 Error RenderingContextDriverWebGPU::_acquire_device() {
 #ifdef WEBGPU_NATIVE_ENABLED
-	// Native device acquisition (wgpu-native) is added with the desktop
-	// backends; implemented in the next milestone.
-	ERR_FAIL_V_MSG(ERR_UNAVAILABLE, "WebGPU: Native device acquisition not implemented yet.");
+	ERR_FAIL_NULL_V_MSG(instance, ERR_CANT_CREATE, "WebGPU: No instance to request an adapter from.");
+
+	wgpuSetLogCallback(_wgpu_log_callback, nullptr);
+
+	// wgpu-native fires request callbacks synchronously inside the call; the
+	// bounded drain loops below are future-proofing in case it goes async.
+	WebGPUAdapterRequest adapter_req;
+	{
+		WGPURequestAdapterOptions options = {};
+		options.powerPreference = WGPUPowerPreference_HighPerformance;
+		WGPURequestAdapterCallbackInfo cb = {};
+		cb.mode = WGPUCallbackMode_AllowProcessEvents;
+		cb.callback = _wgpu_request_adapter_callback;
+		cb.userdata1 = &adapter_req;
+		wgpuInstanceRequestAdapter(instance, &options, cb);
+		for (uint32_t i = 0; i < 1000 && !adapter_req.done; i++) {
+			wgpuInstanceProcessEvents(instance);
+		}
+	}
+	ERR_FAIL_NULL_V_MSG(adapter_req.adapter, ERR_CANT_CREATE, vformat("WebGPU: Failed to request adapter: %s", adapter_req.error));
+	adapter = adapter_req.adapter;
+
+	// Fill device_info from the adapter.
+	WGPUAdapterInfo info = {};
+	if (wgpuAdapterGetInfo(adapter, &info) == WGPUStatus_Success) {
+		device_info.name = String::utf8(info.device.data, info.device.length);
+		device_info.vendor = info.vendorID;
+		switch (info.adapterType) {
+			case WGPUAdapterType_DiscreteGPU:
+				device_info.type = DEVICE_TYPE_DISCRETE_GPU;
+				break;
+			case WGPUAdapterType_IntegratedGPU:
+				device_info.type = DEVICE_TYPE_INTEGRATED_GPU;
+				break;
+			case WGPUAdapterType_CPU:
+				device_info.type = DEVICE_TYPE_CPU;
+				break;
+			default:
+				device_info.type = DEVICE_TYPE_OTHER;
+				break;
+		}
+		print_verbose(vformat("WebGPU: Adapter: %s (driver: %s)", device_info.name, String::utf8(info.description.data, info.description.length)));
+		wgpuAdapterInfoFreeMembers(info);
+	} else {
+		device_info.name = "WebGPU Device";
+		device_info.vendor = Vendor::VENDOR_UNKNOWN;
+		device_info.type = DEVICE_TYPE_OTHER;
+	}
+
+	// Mirror the optional features the web JS shell requests (engine.js),
+	// where this header generation has an enum for them.
+	const WGPUFeatureName optional_features[] = {
+		WGPUFeatureName_TimestampQuery,
+		WGPUFeatureName_TextureFormatsTier1,
+		WGPUFeatureName_TextureFormatsTier2,
+		WGPUFeatureName_Float32Filterable,
+		WGPUFeatureName_Float32Blendable,
+		WGPUFeatureName_RG11B10UfloatRenderable,
+		WGPUFeatureName_ClipDistances,
+		WGPUFeatureName_DualSourceBlending,
+		WGPUFeatureName_Depth32FloatStencil8,
+		WGPUFeatureName_TextureCompressionBC,
+		WGPUFeatureName_TextureCompressionETC2,
+		WGPUFeatureName_TextureCompressionASTC,
+	};
+	LocalVector<WGPUFeatureName> required_features;
+	for (WGPUFeatureName feature : optional_features) {
+		if (wgpuAdapterHasFeature(adapter, feature)) {
+			required_features.push_back(feature);
+		}
+	}
+
+	// Request the limits the adapter offers (the JS shell maxes the ones
+	// Godot cares about; requesting the full adapter limits is equivalent).
+	WGPULimits adapter_limits = WGPU_LIMITS_INIT;
+	bool has_limits = wgpuAdapterGetLimits(adapter, &adapter_limits) == WGPUStatus_Success;
+
+	WebGPUDeviceRequest device_req;
+	{
+		WGPUDeviceDescriptor desc = {};
+		desc.label = WGPUStringView{ "Godot WebGPU Device", WGPU_STRLEN };
+		desc.requiredFeatureCount = required_features.size();
+		desc.requiredFeatures = required_features.ptr();
+		desc.requiredLimits = has_limits ? &adapter_limits : nullptr;
+		desc.deviceLostCallbackInfo.mode = WGPUCallbackMode_AllowSpontaneous;
+		desc.deviceLostCallbackInfo.callback = _wgpu_device_lost_callback;
+		desc.uncapturedErrorCallbackInfo.callback = _wgpu_uncaptured_error_callback;
+
+		WGPURequestDeviceCallbackInfo cb = {};
+		cb.mode = WGPUCallbackMode_AllowProcessEvents;
+		cb.callback = _wgpu_request_device_callback;
+		cb.userdata1 = &device_req;
+		wgpuAdapterRequestDevice(adapter, &desc, cb);
+		for (uint32_t i = 0; i < 1000 && !device_req.done; i++) {
+			wgpuInstanceProcessEvents(instance);
+		}
+	}
+	ERR_FAIL_NULL_V_MSG(device_req.device, ERR_CANT_CREATE, vformat("WebGPU: Failed to request device: %s", device_req.error));
+	device = device_req.device;
+
+	print_verbose("WebGPU: Native device acquired via wgpu-native.");
+	return OK;
 #else
 	ERR_FAIL_V_MSG(ERR_UNAVAILABLE, "WebGPU: No backend implementation for device acquisition on this platform.");
 #endif

@@ -89,7 +89,7 @@ def get_doc_path():
 def get_flags():
     return {
         "arch": detect_arch(),
-        "supported": ["library", "mono"],
+        "supported": ["library", "mono", "webgpu"],
     }
 
 
@@ -543,6 +543,11 @@ def configure(env: "SConsEnvironment"):
         if not env["builtin_glslang"]:
             # No pkgconfig file so far, hardcode expected lib name.
             env.Append(LIBS=["glslang", "SPIRV", "glslang-default-resource-limits"])
+
+    if env["webgpu"]:
+        # Native backend via wgpu-native (headers + static lib supplied through
+        # the wgpu_native_dir option, see drivers/webgpu/SCsub).
+        env.AppendUnique(CPPDEFINES=["WEBGPU_ENABLED", "WEBGPU_NATIVE_ENABLED", "RD_ENABLED"])
 
     if env["opengl3"]:
         env.Append(CPPDEFINES=["GLES3_ENABLED"])

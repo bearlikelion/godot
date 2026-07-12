@@ -49,6 +49,19 @@ struct DepthImageFixResult {
 	Vector<DepthImageInfo> depth_images;
 };
 
+// Inline all function calls (SPIRV-Tools InlineExhaustive + dead function
+// elimination). glslang emits shader helper functions un-inlined; Tint's
+// SPIR-V reader mishandles textures passed as function parameters (its
+// depth-texture conversion misses them and the texture lowering asserts),
+// so flatten everything into the entry point first.
+Vector<uint8_t> inline_functions(const Vector<uint8_t> &p_bytes);
+
+// Strip NonReadable decorations from storage buffers (GLSL `writeonly
+// buffer`). Tint maps them to WGSL `var<storage, write>`, which is not
+// valid WGSL (only `read` and `read_write` exist for buffers). Write-only
+// storage textures keep the decoration.
+Vector<uint8_t> strip_nonreadable_buffer_decoration(const Vector<uint8_t> &p_bytes);
+
 // Evaluate OpSpecConstantOp instructions with default values and replace
 // them with regular OpConstant instructions. Also converts OpSpecConstant*
 // to their non-specialization equivalents and strips SpecId decorations.

@@ -475,6 +475,7 @@ struct WGQueryPool {
 	uint64_t *cpu_results = nullptr;
 	bool readback_pending = false;
 	uint32_t map_generation = 0;    // Incremented each time mapAsync is issued; stale callbacks are ignored.
+	bool map_in_flight = false;     // The current generation's mapAsync callback has not fired yet.
 	bool freed = false;             // Freed while readback pending; callback will clean up.
 };
 

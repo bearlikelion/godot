@@ -199,6 +199,22 @@ opts.Add(BoolVariable("opengl3", "Enable the OpenGL/GLES3 rendering driver", Tru
 opts.Add(BoolVariable("d3d12", "Enable the Direct3D 12 rendering driver on supported platforms", False))
 opts.Add(BoolVariable("metal", "Enable the Metal rendering driver on supported platforms (Apple arm64 only)", False))
 opts.Add(BoolVariable("webgpu", "Enable the WebGPU rendering driver on supported platforms", False))
+opts.Add(
+    PathVariable(
+        "wgpu_native_dir",
+        "Path to a wgpu-native dist (include/webgpu/{webgpu.h,wgpu.h} + lib/) for native WebGPU builds",
+        "thirdparty/wgpu-native",
+        PathVariable.PathAccept,
+    )
+)
+opts.Add(
+    EnumVariable(
+        "webgpu_precompile_wgsl",
+        "Precompile builtin shader WGSL at build time (needs tint_cli and glslang); 'auto' enables it for web only",
+        "auto",
+        ["auto", "yes", "no"],
+    )
+)
 opts.Add(BoolVariable("use_volk", "Use the volk library to load the Vulkan loader dynamically", True))
 opts.Add(BoolVariable("accesskit", "Enable the AccessKit driver for screen reader support", True))
 opts.Add(BoolVariable("angle", "Enable the ANGLE rendering driver for OpenGL ES 3.0 on supported platforms", True))

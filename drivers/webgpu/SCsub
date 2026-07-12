@@ -1,6 +1,8 @@
 #!/usr/bin/env python
 from misc.utility.scons_hints import *
 
+from methods import print_error
+
 Import("env")
 
 import wgsl_precompile
@@ -729,10 +731,59 @@ env_webgpu.add_source_files(env.drivers_sources, webgpu_sources)
 env.drivers_sources += spirv_tools_obj
 env.drivers_sources += tint_obj
 
-# Generate precompiled SPIR-V → WGSL lookup table at build time.
-# The generated header is #included by rendering_device_driver_webgpu.cpp.
+# =============================================================================
+# Native backend: wgpu-native (desktop platforms)
+# =============================================================================
+
+if env["platform"] != "web":
+    import os.path
+
+    wgpu_native_dir = env.Dir("#" + env["wgpu_native_dir"]).abspath
+    wgpu_native_include = os.path.join(wgpu_native_dir, "include")
+    wgpu_native_lib = os.path.join(wgpu_native_dir, "lib")
+    if not os.path.isfile(os.path.join(wgpu_native_include, "webgpu", "webgpu.h")) or not os.path.isdir(
+        wgpu_native_lib
+    ):
+        print_error(
+            "webgpu=yes on a native platform needs a wgpu-native dist at '{}'\n"
+            "(expected include/webgpu/webgpu.h, include/webgpu/wgpu.h and lib/).\n"
+            "Either unpack a wgpu-native release zip there, or build it locally:\n"
+            "  cd wgpu-native && git submodule update --init && cargo build --release\n"
+            "then copy ffi/webgpu-headers/webgpu.h and ffi/wgpu.h to include/webgpu/\n"
+            "and target/release/libwgpu_native.a to lib/. A different location can\n"
+            "be passed with wgpu_native_dir=<path>.".format(wgpu_native_dir)
+        )
+        Exit(255)
+
+    # The umbrella header (godot_webgpu.h) is included from platform display
+    # servers too, so the include path and the library go on the global env.
+    env.Prepend(CPPPATH=[wgpu_native_include])
+    env_webgpu.Prepend(CPPPATH=[wgpu_native_include])
+    env.Append(LIBPATH=[wgpu_native_lib])
+    env.Append(LIBS=["wgpu_native"])
+
+    # Godot already links accesskit, another Rust staticlib; both archives
+    # define rust_eh_personality, which fails the link with a multiple
+    # definition error. Weaken it in the wgpu-native archive so the other
+    # (identical) definition wins. Idempotent; ELF only.
+    if env["platform"] == "linuxbsd":
+        import subprocess
+
+        static_lib = os.path.join(wgpu_native_lib, "libwgpu_native.a")
+        if os.path.isfile(static_lib):
+            subprocess.run(["objcopy", "--weaken-symbol=rust_eh_personality", static_lib], check=False)
+
+# =============================================================================
+# Precompiled SPIR-V → WGSL lookup table
+# =============================================================================
+
+# Generate the table at build time (web default) or emit an empty one
+# (native default; runtime Tint covers all shaders). The generated header
+# is #included by rendering_device_driver_webgpu.cpp.
+precompile_mode = env["webgpu_precompile_wgsl"]
+do_precompile = precompile_mode == "yes" or (precompile_mode == "auto" and env["platform"] == "web")
 env.CommandNoCache(
     "#drivers/webgpu/wgsl_precompiled.gen.h",
     "#drivers/webgpu/wgsl_precompile.py",
-    env.Run(wgsl_precompile.build_wgsl_precompiled),
+    env.Run(wgsl_precompile.build_wgsl_precompiled if do_precompile else wgsl_precompile.build_wgsl_precompiled_empty),
 )

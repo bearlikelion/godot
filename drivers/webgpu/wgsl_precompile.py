@@ -875,6 +875,19 @@ def build_wgsl_precompiled(target, source, env):
     precompile_wgsl(repo_root, output, glslang)
 
 
+def build_wgsl_precompiled_empty(target, source, env):
+    """scons builder action that emits an empty precompiled table.
+
+    Used when webgpu_precompile_wgsl is off (native builds by default), so
+    desktop builds do not need the tint_convert_cli and glslangValidator
+    host tools. The runtime Tint fallback plus the in-memory WGSL cache
+    handle all shaders; only shader load time differs.
+    """
+    output = str(target[0])
+    generate_precompiled_header([], output)
+    print(f"[WGSL Precompile] Precompilation disabled; wrote empty lookup table to {output}")
+
+
 # ---------------------------------------------------------------------------
 # Standalone execution (for testing / CI)
 # ---------------------------------------------------------------------------

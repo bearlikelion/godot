@@ -171,6 +171,7 @@ static char *_translate_spirv_to_wgsl(const uint8_t *p_spv_ptr, int p_spv_size) 
 	memcpy(spv.ptrw(), p_spv_ptr, p_spv_size);
 
 	// SPIR-V preprocessing pipeline:
+	spv = spirv_preprocess::inline_functions(spv);
 	spv = spirv_preprocess::freeze_spec_constant_ops(spv);
 	spv = spirv_preprocess::rewrite_copy_logical(spv);
 	spv = spirv_preprocess::rewrite_terminate_invocation(spv);
@@ -183,6 +184,7 @@ static char *_translate_spirv_to_wgsl(const uint8_t *p_spv_ptr, int p_spv_size) 
 	spv = spirv_preprocess::strip_memory_barrier(spv);
 	spv = spirv_preprocess::fix_nonfinite_literals(spv);
 	spv = spirv_preprocess::flatten_binding_arrays(spv);
+	spv = spirv_preprocess::strip_nonreadable_buffer_decoration(spv);
 	spv = spirv_preprocess::infer_readonly_storage(spv);
 
 	// Convert to uint32_t words for Tint.
@@ -1073,9 +1075,11 @@ uint8_t *RenderingDeviceDriverWebGPU::buffer_map(BufferID p_buffer) {
 			return buf->shadow_map;
 		}
 
+#ifdef __EMSCRIPTEN__
 		// Callback didn't fire, but check if the buffer is mapped anyway.
 		// emdawnwebgpu may have completed the map at the JS level even
-		// though the C callback hasn't been delivered yet.
+		// though the C callback hasn't been delivered yet. (This probe is
+		// web-only: wgpuBufferGetMapState is unimplemented in wgpu-native.)
 		WGPUBufferMapState state = wgpuBufferGetMapState(buf->handle);
 		if (state == WGPUBufferMapState_Mapped) {
 			const void *mapped = wgpuBufferGetConstMappedRange(buf->handle, 0, buf->size);
@@ -1086,6 +1090,16 @@ uint8_t *RenderingDeviceDriverWebGPU::buffer_map(BufferID p_buffer) {
 			wgpuBufferUnmap(buf->handle);
 			return buf->shadow_map;
 		}
+#else
+		// Native: callbacks are delivered deterministically by wgpuDevicePoll;
+		// keep waiting while a map is still in flight.
+		for (uint32_t i = 0; i < 1000 && buf->map_pending && context_driver; i++) {
+			context_driver->poll_events(true);
+		}
+		if (buf->map_complete) {
+			buf->map_complete = false;
+		}
+#endif
 
 		return buf->shadow_map;
 	}
@@ -1203,8 +1217,15 @@ void RenderingDeviceDriverWebGPU::buffer_initiate_async_map(BufferID p_buffer) {
 	}
 
 	// Only initiate if the buffer isn't already pending a map.
-	WGPUBufferMapState state = wgpuBufferGetMapState(buf->handle);
-	if (state == WGPUBufferMapState_Unmapped) {
+#ifdef __EMSCRIPTEN__
+	bool can_map = wgpuBufferGetMapState(buf->handle) == WGPUBufferMapState_Unmapped;
+#else
+	// Native: the map callback unmaps the buffer when it fires, so the
+	// driver's own flag is authoritative (wgpuBufferGetMapState is
+	// unimplemented in wgpu-native).
+	bool can_map = !buf->map_pending;
+#endif
+	if (can_map) {
 		if (!buf->shadow_map) {
 			buf->shadow_map = (uint8_t *)memalloc(buf->size);
 			memset(buf->shadow_map, 0, buf->size);
@@ -2008,7 +2029,9 @@ Vector<uint8_t> RenderingDeviceDriverWebGPU::texture_get_data(TextureID p_textur
 			context_driver->poll_events(true);
 #endif
 		}
+#ifdef __EMSCRIPTEN__
 		if (!entry->map_complete) {
+			// Web-only probe; wgpuBufferGetMapState is unimplemented in wgpu-native.
 			WGPUBufferMapState state = wgpuBufferGetMapState(entry->staging);
 			if (state == WGPUBufferMapState_Mapped) {
 				const void *mapped = wgpuBufferGetConstMappedRange(entry->staging, 0, entry->size);
@@ -2021,6 +2044,13 @@ Vector<uint8_t> RenderingDeviceDriverWebGPU::texture_get_data(TextureID p_textur
 				entry->map_complete = true;
 			}
 		}
+#else
+		// Native: keep polling while the map is in flight; the callback
+		// fills the shadow buffer and sets the flags.
+		for (uint32_t i = 0; i < 1000 && entry->map_pending && context_driver; i++) {
+			context_driver->poll_events(true);
+		}
+#endif
 	}
 
 	// Return cached data if previous readback completed.
@@ -2870,13 +2900,19 @@ Error RenderingDeviceDriverWebGPU::command_queue_execute_and_present(CommandQueu
 			for (uint32_t j = 0; j < cmd->written_query_pools.size(); j++) {
 				WGQueryPool *pool = cmd->written_query_pools[j];
 				if (pool->readback_pending && pool->readback_buffer) {
-					// Only issue mapAsync if the buffer is actually in Unmapped state.
-					// If a previous map is still pending (GPU hasn't completed), skip.
-					WGPUBufferMapState state = wgpuBufferGetMapState(pool->readback_buffer);
-					if (state != WGPUBufferMapState_Unmapped) {
+					// Only issue mapAsync if no previous map is still in flight.
+#ifdef __EMSCRIPTEN__
+					// Web-only probe; wgpuBufferGetMapState is unimplemented in wgpu-native.
+					if (wgpuBufferGetMapState(pool->readback_buffer) != WGPUBufferMapState_Unmapped) {
 						continue;
 					}
+#else
+					if (pool->map_in_flight) {
+						continue;
+					}
+#endif
 					pool->map_generation++;
+					pool->map_in_flight = true;
 					WGPUBufferMapCallbackInfo cb_info = {};
 					cb_info.mode = WGPUCallbackMode_AllowSpontaneous;
 					cb_info.callback = _timestamp_readback_callback;
@@ -2955,8 +2991,10 @@ void RenderingDeviceDriverWebGPU::command_buffer_end(CommandBufferID p_cmd_buffe
 
 		// Ensure the readback buffer is in Unmapped state before encoding a copy to it.
 		// The previous frame's mapAsync may still be pending if the GPU hasn't completed.
+#ifdef __EMSCRIPTEN__
 		// emdawnwebgpu does not reliably cancel pending maps via wgpuBufferUnmap, so we
 		// check the actual state and skip this frame's resolve+copy if the buffer is stuck.
+		// (Web-only probe; wgpuBufferGetMapState is unimplemented in wgpu-native.)
 		WGPUBufferMapState map_state = wgpuBufferGetMapState(pool->readback_buffer);
 		if (map_state != WGPUBufferMapState_Unmapped) {
 			// Try to drain pending callbacks first.
@@ -2979,6 +3017,19 @@ void RenderingDeviceDriverWebGPU::command_buffer_end(CommandBufferID p_cmd_buffe
 				continue;
 			}
 		}
+#else
+		if (pool->map_in_flight) {
+			// Drain callbacks; if the map is still in flight afterwards,
+			// skip this frame's resolve+copy (same as the web path).
+			if (context_driver) {
+				context_driver->poll_events(false);
+			}
+			if (pool->map_in_flight) {
+				pool->readback_pending = false;
+				continue;
+			}
+		}
+#endif
 		pool->readback_pending = false;
 
 		wgpuCommandEncoderResolveQuerySet(cmd->encoder, pool->handle, 0, pool->count, pool->resolve_buffer, 0);
@@ -8533,6 +8584,8 @@ static void _timestamp_readback_callback(WGPUMapAsyncStatus p_status, WGPUString
 		return;
 	}
 
+	pool->map_in_flight = false;
+
 	if (p_status == WGPUMapAsyncStatus_Success) {
 		const void *data = wgpuBufferGetConstMappedRange(pool->readback_buffer, 0, sizeof(uint64_t) * pool->count);
 		if (data) {
@@ -8680,6 +8733,16 @@ void RenderingDeviceDriverWebGPU::end_segment() {
 // =============================================================================
 
 void RenderingDeviceDriverWebGPU::set_object_name(ObjectType p_type, ID p_driver_id, const String &p_name) {
+#ifndef __EMSCRIPTEN__
+	// The wgpu*SetLabel entry points are unimplemented in wgpu-native v29
+	// (they panic). Labels are debug-only; keep the shader name and skip
+	// the rest on native.
+	if (p_type == OBJECT_TYPE_SHADER && p_driver_id.id != 0) {
+		WGShader *native_shader = (WGShader *)(p_driver_id.id);
+		native_shader->name = p_name;
+	}
+	return;
+#else
 	// Propagate names to Dawn so validation errors reference the Godot resource
 	// (otherwise Dawn reports "[Texture (unlabeled ...)]"). CharString must live
 	// until wgpuXxxSetLabel returns — Dawn copies the string internally.
@@ -8735,6 +8798,7 @@ void RenderingDeviceDriverWebGPU::set_object_name(ObjectType p_type, ID p_driver
 			}
 		} break;
 	}
+#endif // __EMSCRIPTEN__
 }
 
 uint64_t RenderingDeviceDriverWebGPU::get_resource_native_handle(DriverResource p_type, ID p_driver_id) {

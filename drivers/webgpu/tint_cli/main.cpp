@@ -52,20 +52,44 @@ static std::string convert_spirv_to_wgsl(const std::vector<uint8_t> &p_spv_bytes
 	spv.resize((int64_t)p_spv_bytes.size());
 	memcpy(spv.ptrw(), p_spv_bytes.data(), p_spv_bytes.size());
 
-	// 11 preprocessing passes (same order as rendering_device_driver_webgpu.cpp).
-	spv = spirv_preprocess::freeze_spec_constant_ops(spv);
-	spv = spirv_preprocess::rewrite_copy_logical(spv);
-	spv = spirv_preprocess::rewrite_terminate_invocation(spv);
-	spv = spirv_preprocess::convert_push_constants_to_uniforms(spv);
-	spv = spirv_preprocess::split_combined_samplers(spv);
-	auto depth_result = spirv_preprocess::fix_depth2_images(spv);
-	spv = depth_result.bytes;
-	spv = spirv_preprocess::negate_position_y(spv);
-	spv = spirv_preprocess::strip_restrict_decoration(spv);
-	spv = spirv_preprocess::strip_memory_barrier(spv);
-	spv = spirv_preprocess::fix_nonfinite_literals(spv);
-	spv = spirv_preprocess::flatten_binding_arrays(spv);
-	spv = spirv_preprocess::infer_readonly_storage(spv);
+	// Preprocessing passes (same order as rendering_device_driver_webgpu.cpp).
+	// Debug: TINT_CLI_MAX_PASSES=<N> runs only the first N passes;
+	// TINT_CLI_DUMP_SPV=<path> dumps the preprocessed SPIR-V before Tint.
+	int max_passes = 999;
+	if (const char *mp = getenv("TINT_CLI_MAX_PASSES")) {
+		max_passes = atoi(mp);
+	}
+	int pass_i = 0;
+	auto run = [&](auto fn) {
+		if (pass_i++ < max_passes) {
+			spv = fn(spv);
+		}
+	};
+	run(spirv_preprocess::inline_functions);
+	run(spirv_preprocess::freeze_spec_constant_ops);
+	run(spirv_preprocess::rewrite_copy_logical);
+	run(spirv_preprocess::rewrite_terminate_invocation);
+	run(spirv_preprocess::convert_push_constants_to_uniforms);
+	run(spirv_preprocess::split_combined_samplers);
+	if (pass_i++ < max_passes) {
+		auto depth_result = spirv_preprocess::fix_depth2_images(spv);
+		spv = depth_result.bytes;
+	}
+	run(spirv_preprocess::negate_position_y);
+	run(spirv_preprocess::strip_restrict_decoration);
+	run(spirv_preprocess::strip_memory_barrier);
+	run(spirv_preprocess::fix_nonfinite_literals);
+	run(spirv_preprocess::flatten_binding_arrays);
+	run(spirv_preprocess::strip_nonreadable_buffer_decoration);
+	run(spirv_preprocess::infer_readonly_storage);
+
+	if (const char *dump_path = getenv("TINT_CLI_DUMP_SPV")) {
+		FILE *df = fopen(dump_path, "wb");
+		if (df) {
+			fwrite(spv.ptr(), 1, (size_t)spv.size(), df);
+			fclose(df);
+		}
+	}
 
 	// Ensure SPIR-V version is at least 1.3 (0x00010300). The preprocessing
 	// passes produce constructs (StorageBuffer storage class) that require 1.3,

@@ -34,11 +34,45 @@
 #include "core/templates/hash_set.h"
 #include "core/templates/vector.h"
 
+#include "spirv-tools/optimizer.hpp"
+
 #include <cfloat>
 #include <cmath>
 #include <cstring>
+#include <vector>
 
 namespace spirv_preprocess {
+
+// ---- inline_functions ----
+
+Vector<uint8_t> inline_functions(const Vector<uint8_t> &p_bytes) {
+	if (p_bytes.size() < 20 || (p_bytes.size() % 4) != 0) {
+		return p_bytes;
+	}
+
+	const size_t word_count = (size_t)(p_bytes.size() / 4);
+	std::vector<uint32_t> words(word_count);
+	memcpy(words.data(), p_bytes.ptr(), p_bytes.size());
+
+	spvtools::Optimizer opt(SPV_ENV_VULKAN_1_1);
+	opt.SetMessageConsumer([](spv_message_level_t, const char *, const spv_position_t &, const char *) {});
+	opt.RegisterPass(spvtools::CreateInlineExhaustivePass());
+	opt.RegisterPass(spvtools::CreateEliminateDeadFunctionsPass());
+
+	std::vector<uint32_t> out_words;
+	spvtools::OptimizerOptions options;
+	options.set_run_validator(false);
+	if (!opt.Run(words.data(), words.size(), &out_words, options)) {
+		// Inlining is an enabling transform, not a correctness one; fall
+		// back to the original module if the optimizer rejects it.
+		return p_bytes;
+	}
+
+	Vector<uint8_t> result;
+	result.resize((int64_t)out_words.size() * 4);
+	memcpy(result.ptrw(), out_words.data(), result.size());
+	return result;
+}
 
 // ---- SPIR-V opcode constants ----
 
@@ -1948,6 +1982,108 @@ Vector<uint8_t> strip_restrict_decoration(const Vector<uint8_t> &p_bytes) {
 	return out;
 }
 
+// ---- strip_nonreadable_buffer_decoration ----
+
+Vector<uint8_t> strip_nonreadable_buffer_decoration(const Vector<uint8_t> &p_bytes) {
+	const int64_t len = p_bytes.size();
+	const uint32_t total_words = (uint32_t)(len / 4);
+
+	if (total_words < 5) {
+		return p_bytes;
+	}
+
+	const uint8_t *data = p_bytes.ptr();
+	static constexpr uint32_t DECO_NON_READABLE = 25;
+
+	// Pass 1: find image-typed variables (write-only storage textures keep
+	// NonReadable; WGSL storage buffers must not, as `write` access is not
+	// valid WGSL) and check whether any NonReadable decoration exists.
+	HashSet<uint32_t> image_types; // OpTypeImage + pointers/arrays leading to one.
+	HashSet<uint32_t> image_vars;
+	bool found = false;
+
+	uint32_t pos = 5;
+	while (pos < total_words) {
+		uint32_t w0 = read_word(data, len, pos);
+		uint32_t wc = (w0 >> 16);
+		uint16_t op = (uint16_t)(w0 & 0xFFFF);
+		if (wc == 0 || pos + wc > total_words) {
+			break;
+		}
+
+		switch (op) {
+			case OP_TYPE_IMAGE: {
+				image_types.insert(read_word(data, len, pos + 1));
+			} break;
+			case OP_TYPE_ARRAY:
+			case OP_TYPE_RUNTIME_ARRAY: {
+				if (wc >= 3 && image_types.has(read_word(data, len, pos + 2))) {
+					image_types.insert(read_word(data, len, pos + 1));
+				}
+			} break;
+			case OP_TYPE_POINTER: {
+				if (wc >= 4 && image_types.has(read_word(data, len, pos + 3))) {
+					image_types.insert(read_word(data, len, pos + 1));
+				}
+			} break;
+			case OP_VARIABLE: {
+				if (wc >= 3 && image_types.has(read_word(data, len, pos + 1))) {
+					image_vars.insert(read_word(data, len, pos + 2));
+				}
+			} break;
+			case OP_DECORATE: {
+				if (wc >= 3 && read_word(data, len, pos + 2) == DECO_NON_READABLE) {
+					found = true;
+				}
+			} break;
+			case OP_MEMBER_DECORATE: {
+				if (wc >= 4 && read_word(data, len, pos + 3) == DECO_NON_READABLE) {
+					found = true;
+				}
+			} break;
+			default:
+				break;
+		}
+		pos += wc;
+	}
+
+	if (!found) {
+		return p_bytes;
+	}
+
+	// Pass 2: strip NonReadable from everything except image variables.
+	// Struct members can never be images in Vulkan SPIR-V, so member
+	// decorations are always buffer members and always stripped.
+	Vector<uint8_t> out;
+	append_bytes(out, data, 0, 20);
+
+	pos = 5;
+	while (pos < total_words) {
+		uint32_t w0 = read_word(data, len, pos);
+		uint32_t wc = (w0 >> 16);
+		uint16_t op = (uint16_t)(w0 & 0xFFFF);
+		if (wc == 0 || pos + wc > total_words) {
+			break;
+		}
+
+		bool skip = false;
+		if (op == OP_DECORATE && wc >= 3 && read_word(data, len, pos + 2) == DECO_NON_READABLE) {
+			uint32_t target = read_word(data, len, pos + 1);
+			skip = !image_vars.has(target);
+		}
+		if (op == OP_MEMBER_DECORATE && wc >= 4 && read_word(data, len, pos + 3) == DECO_NON_READABLE) {
+			skip = true;
+		}
+
+		if (!skip) {
+			append_bytes(out, data, pos * 4, wc * 4);
+		}
+		pos += wc;
+	}
+
+	return out;
+}
+
 // ---- strip_memory_barrier ----
 
 Vector<uint8_t> strip_memory_barrier(const Vector<uint8_t> &p_bytes) {
@@ -2349,25 +2485,64 @@ Vector<uint8_t> flatten_binding_arrays(const Vector<uint8_t> &p_bytes) {
 		// OpConstant/OpSpecConstant: words 3+ are literal values.
 		// OpConstantComposite/OpSpecConstantComposite: words 3+ are constituent IDs (DO replace).
 		// OpSwitch: alternating case literals starting at word 3 (word 3=literal, 4=label, 5=literal...).
+		// Debug, decoration, and literal-index instructions: only the leading
+		// id operands are replaceable; strings, decoration values (Offset,
+		// Binding, ...), and component indices are literals that can collide
+		// with remapped ids (this corrupted UBO Offset decorations before).
 		bool has_literals = false;
 		uint32_t literal_start = 0;
 		bool switch_alternating = false;
+		uint32_t replace_limit = wc; // Words [1, replace_limit) are eligible ids.
 
 		if (op == OP_CONSTANT || op == OP_SPEC_CONSTANT) {
 			has_literals = true;
 			literal_start = 3;
 		} else if (op == 251 /* OpSwitch */) {
 			switch_alternating = true;
+		} else {
+			switch (op) {
+				case 3 /* OpSource */:
+				case 8 /* OpLine */:
+				case 2 /* OpSourceContinued */:
+				case 4 /* OpSourceExtension */:
+				case 330 /* OpModuleProcessed */:
+					replace_limit = 1; // Nothing replaceable.
+					break;
+				case OP_NAME:
+				case 7 /* OpString */:
+				case 16 /* OpExecutionMode */:
+				case OP_DECORATE:
+					replace_limit = 2; // Only the target id.
+					break;
+				case 6 /* OpMemberName */:
+				case OP_MEMBER_DECORATE:
+					replace_limit = 2; // Target id only; member index and values are literals.
+					break;
+				case 79 /* OpVectorShuffle */:
+					replace_limit = 5; // type, result, vec1, vec2; then literal indices.
+					break;
+				case 81 /* OpCompositeExtract */:
+					replace_limit = 4; // type, result, composite; then literal indices.
+					break;
+				case 82 /* OpCompositeInsert */:
+					replace_limit = 5; // type, result, object, composite; then literal indices.
+					break;
+				default:
+					break;
+			}
 		}
 
 		// Check if this instruction has any word that needs replacement.
 		bool needs_rewrite = false;
-		for (uint32_t i = 1; i < wc; i++) {
+		for (uint32_t i = 1; i < wc && i < replace_limit; i++) {
 			if (has_literals && i >= literal_start) {
 				continue;
 			}
 			if (switch_alternating && i >= 2 && ((i - 2) % 2 == 0)) {
 				continue; // Case literal positions in OpSwitch.
+			}
+			if (op == 12 /* OpExtInst */ && i == 4) {
+				continue; // Literal ext-instruction number.
 			}
 			uint32_t word = read_word(data, len, pos + i);
 			if (array_to_elem.has(word) || ac_to_var.has(word) || ptr_remap.has(word)) {
@@ -2383,11 +2558,19 @@ Vector<uint8_t> flatten_binding_arrays(const Vector<uint8_t> &p_bytes) {
 					push_word(out, word);
 					continue;
 				}
+				if (i >= replace_limit) {
+					push_word(out, word);
+					continue;
+				}
 				if (has_literals && i >= literal_start) {
 					push_word(out, word);
 					continue;
 				}
 				if (switch_alternating && i >= 2 && ((i - 2) % 2 == 0)) {
+					push_word(out, word);
+					continue;
+				}
+				if (op == 12 /* OpExtInst */ && i == 4) {
 					push_word(out, word);
 					continue;
 				}
