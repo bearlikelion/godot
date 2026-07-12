@@ -11,6 +11,7 @@
 # Usage:
 #   ./compile_godot.sh --editor --linux
 #   ./compile_godot.sh --windows --release
+#   ./compile_godot.sh --web --release
 #   ./compile_godot.sh --all-templates
 #
 # See --help for the full flag list.
@@ -35,6 +36,8 @@ USE_PODMAN=0             # build linux inside the old-glibc buildroot container
 PODMAN_IMAGE="localhost/godot-linux:4.7-f43"
 PODMAN_ARCH="x86_64"     # x86_64 | i686 | aarch64 | arm (buildroot SDK arch)
 OSXCROSS_ROOT="${OSXCROSS_ROOT:-}"  # osxcross install root; required (with its target/bin on PATH) for macOS cross-builds
+WEB_NOTHREADS=0          # build the web template with threads=no (no SharedArrayBuffer/COOP+COEP needed)
+WEB_DLINK=0              # build the web template with dlink_enabled=yes (GDExtension support)
 ENCRYPTION_KEY_FILE=""   # path to a 64-hex-char PCK script encryption key file (e.g. ~/.config/godot/godot.gdkey)
 DEFAULT_ENCRYPTION_KEY_FILE="${XDG_CONFIG_HOME:-$HOME/.config}/godot/godot.gdkey"  # used when neither --encryption-key nor SCRIPT_AES256_ENCRYPTION_KEY is set
 
@@ -50,13 +53,17 @@ Target platform (default: host OS):
   --windows              Build for Windows (platform=windows; needs mingw when cross-compiling)
   --macos                Build for macOS (platform=macos; build on macOS, or cross-compile
                           via osxcross on Linux with --osxcross-sdk)
+  --web                  Build for the Web (platform=web; needs an activated Emscripten
+                          toolchain, i.e. emcc on PATH via "source emsdk_env.sh").
+                          Templates only: combine with --release / --debug-template.
 
 Build type (default: --editor):
   --editor               Editor build (dev_build, clang+mold+ccache, no LTO)
   --no-dev-build         Build the editor without dev_build=yes (smaller/faster, non-dev binary)
   --release              Release export template (production, lto=full, no update check)
   --debug-template       Debug export template (production)
-  --all-templates        Build release + debug templates for linux+windows (+macos on a mac)
+  --all-templates        Build release + debug templates for linux+windows (+macos on a mac
+                          or with --osxcross-sdk, +web when emcc is on PATH)
 
 Options:
   --lto MODE             Override LTO: none | thin | full
@@ -74,6 +81,13 @@ Options:
                          $XDG_CONFIG_HOME/godot/godot.gdkey (~/.config/godot/godot.gdkey).
                          If none of those exist, the template is built with no encryption
                          (zero key).
+  --web-nothreads        Web only: build with threads=no. The resulting template does not
+                         need SharedArrayBuffer (no COOP/COEP headers on the web server),
+                         at the cost of no thread support. Matches the "nothreads" official
+                         template variant; the export preset's Thread Support option must
+                         agree with the variant installed.
+  --web-dlink            Web only: build with dlink_enabled=yes for GDExtension support
+                         (bigger and slower template; matches the "dlink" official variant).
   --osxcross-sdk SDK     osxcross SDK/toolchain id (e.g. darwin24.4) for cross-compiling
                          macOS from Linux. Requires osxcross's target/bin on PATH.
   --macos-arch ARCH      universal | arm64 | x86_64 (default: universal) for macOS builds.
@@ -89,7 +103,8 @@ Options:
 
 Every build always includes:
   disable_overrides=yes
-  debug_symbols=yes separate_debug_symbols=yes   (stripped binary + .debugsymbols side file)
+  debug_symbols=yes separate_debug_symbols=yes   (stripped binary + .debugsymbols side file;
+                                                  native platforms only, not web/wasm)
 EOF
 }
 
@@ -164,6 +179,12 @@ check_toolchain() {
 		fi
 	fi
 
+	if [ "$plat" = "web" ]; then
+		# Web builds compile through Emscripten; an activated emsdk puts emcc on PATH.
+		command -v emcc >/dev/null 2>&1 ||
+			err "web builds need the Emscripten toolchain on PATH (install emsdk, then 'source emsdk_env.sh')"
+	fi
+
 	if [ "$plat" = "macos" ] && [ "$host" != "macos" ]; then
 		[ -n "$OSXCROSS_SDK" ] || err "cross-compiling macOS from $host needs --osxcross-sdk (e.g. darwin24.4)"
 		command -v "x86_64-apple-${OSXCROSS_SDK}-clang" >/dev/null 2>&1 ||
@@ -188,6 +209,9 @@ while [ $# -gt 0 ]; do
 		--linux) PLATFORM="linuxbsd" ;;
 		--windows) PLATFORM="windows" ;;
 		--macos) PLATFORM="macos" ;;
+		--web) PLATFORM="web" ;;
+		--web-nothreads) WEB_NOTHREADS=1 ;;
+		--web-dlink) WEB_DLINK=1 ;;
 		--editor) BUILD_TYPE="editor" ;;
 		--release) BUILD_TYPE="release" ;;
 		--debug-template) BUILD_TYPE="debug-template" ;;
@@ -249,6 +273,10 @@ build() {
 		return
 	fi
 
+	if [ "$plat" = "web" ] && [ "$btype" = "editor" ]; then
+		err "the web platform only builds export templates; use --release or --debug-template with --web"
+	fi
+
 	local use_podman=0
 	if [ "$plat" = "linuxbsd" ] && [ "$USE_PODMAN" -eq 1 ]; then
 		use_podman=1
@@ -260,10 +288,26 @@ build() {
 	local -a args=(
 		"platform=$plat"
 		"disable_overrides=yes"
-		"debug_symbols=yes"
-		"separate_debug_symbols=yes"
 		"-j$JOBS"
 	)
+
+	# Separate .debugsymbols side files are an ELF/PE concept; wasm has no equivalent and
+	# forcing debug symbols into a web template would bloat the shipped .wasm instead.
+	if [ "$plat" != "web" ]; then
+		args+=(
+			"debug_symbols=yes"
+			"separate_debug_symbols=yes"
+		)
+	fi
+
+	if [ "$plat" = "web" ]; then
+		if [ "$WEB_NOTHREADS" -eq 1 ]; then
+			args+=("threads=no")
+		fi
+		if [ "$WEB_DLINK" -eq 1 ]; then
+			args+=("dlink_enabled=yes")
+		fi
+	fi
 
 	if [ "$plat" = "macos" ]; then
 		args+=("arch=${arch_override:-$MACOS_ARCH}")
@@ -310,10 +354,12 @@ build() {
 			;;
 	esac
 
-	# LTO: explicit override wins; otherwise templates default to full, editor to none.
+	# LTO: explicit override wins; otherwise native templates default to full, editor to
+	# none. Web templates pass nothing and let production=yes pick Emscripten's default;
+	# forcing lto=full there makes wasm-ld linking extremely slow and memory hungry.
 	if [ -n "$LTO" ]; then
 		args+=("lto=$LTO")
-	elif [ "$btype" != "editor" ]; then
+	elif [ "$btype" != "editor" ] && [ "$plat" != "web" ]; then
 		args+=("lto=full")
 	fi
 
@@ -333,8 +379,55 @@ build() {
 	fi
 
 	if [ "$DO_CLEAN" -eq 0 ]; then
-		report_debug_symbols "$plat"
+		if [ "$plat" = "web" ]; then
+			report_web_template "$btype"
+		else
+			report_debug_symbols "$plat"
+		fi
 	fi
+}
+
+# The web build zips itself into bin/ (godot.web.<target>.wasm32[.nothreads][.dlink].zip).
+# The editor only picks it up from the export templates directory under the matching
+# official name, so print exactly where to install it.
+report_web_template() {
+	local btype="$1"
+	local target_suffix install_name
+	case "$btype" in
+		release) target_suffix="template_release"; install_name="web_release.zip" ;;
+		debug-template) target_suffix="template_debug"; install_name="web_debug.zip" ;;
+		*) err "internal: unknown build type '$btype'" ;;
+	esac
+
+	local variant=""
+	if [ "$WEB_NOTHREADS" -eq 1 ]; then
+		variant=".nothreads"
+		install_name="web_nothreads_${install_name#web_}"
+	fi
+	if [ "$WEB_DLINK" -eq 1 ]; then
+		variant="${variant}.dlink"
+		install_name="web_dlink_${install_name#web_}"
+	fi
+
+	local zip="bin/godot.web.${target_suffix}.wasm32${variant}.zip"
+	[ -f "$zip" ] || err "expected web template zip not found: $zip"
+
+	# The editor looks for templates under <major>.<minor>[.<patch>].<status>, mirroring
+	# VERSION_FULL_CONFIG (patch is omitted when 0). Read it from version.py in the repo root.
+	local version_dir
+	version_dir="$(python3 -c '
+import version
+number = f"{version.major}.{version.minor}"
+if version.patch != 0:
+    number += f".{version.patch}"
+print(f"{number}.{version.status}")
+' 2>/dev/null || true)"
+	[ -n "$version_dir" ] || version_dir="<version>"
+
+	echo ">>> web template: $zip"
+	echo ">>> install it for the editor with:"
+	echo "    mkdir -p ~/.local/share/godot/export_templates/${version_dir}"
+	echo "    cp $zip ~/.local/share/godot/export_templates/${version_dir}/${install_name}"
 }
 
 # Combine the arm64 + x86_64 macOS binaries scons just built into one universal (fat)
@@ -454,6 +547,11 @@ if [ "$ALL_TEMPLATES" -eq 1 ]; then
 	platforms=("linuxbsd" "windows")
 	if [ "$host" = "macos" ] || [ -n "$OSXCROSS_SDK" ]; then
 		platforms+=("macos")
+	fi
+	if command -v emcc >/dev/null 2>&1; then
+		platforms+=("web")
+	else
+		echo ">>> skipping web templates (emcc not on PATH; 'source emsdk_env.sh' to include them)" >&2
 	fi
 	for p in "${platforms[@]}"; do
 		build "$p" "release"
