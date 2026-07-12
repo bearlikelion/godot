@@ -8791,6 +8791,10 @@ uint64_t RenderingDeviceDriverWebGPU::api_trait_get(ApiTrait p_trait) {
 		// Pass instance index via firstInstance instead of push constants.
 		// Eliminates per-draw SetBindGroup for push constant ring buffer.
 		case API_TRAIT_FIRST_INSTANCE_INDEX: return 1;
+		// buffer_map() returns a CPU shadow copy; buffer_unmap() flushes it
+		// via wgpuQueueWriteBuffer. RenderingDevice::_end_frame() relies on
+		// this to flush upload staging blocks before submit.
+		case API_TRAIT_BUFFER_MAP_IS_SHADOW_COPY: return 1;
 		default: return RenderingDeviceDriver::api_trait_get(p_trait);
 	}
 }

@@ -8438,7 +8438,12 @@ void RenderingDevice::_end_frame() {
 	// texture_update() / buffer_update() lives only in the shadow until
 	// buffer_unmap() flushes it via wgpuQueueWriteBuffer. This must happen
 	// before the command buffer that references these staging buffers is submitted.
-	// On Vulkan/Metal this is a no-op since buffer_map() returns GPU-visible memory.
+	//
+	// Only done when the driver reports shadow-copy mapping semantics. On
+	// Vulkan/Metal the staging blocks are persistently mapped for their whole
+	// lifetime (mapped once in _insert_staging_block, unmapped once at
+	// finalization), so unmapping here would unbalance the VMA map refcount
+	// (asserting in dev builds) and leave data_ptr dangling for later frames.
 	//
 	// Note: we do NOT re-map after unmapping. The shadow buffer persists and
 	// data_ptr remains valid. Re-mapping would unconditionally set map_dirty,
@@ -8448,8 +8453,10 @@ void RenderingDevice::_end_frame() {
 	// specific dirty regions and clear map_dirty, the unmap here is typically a
 	// no-op. Only blocks that weren't handled by command_copy need flushing
 	// (e.g. persistent dynamic buffers).
-	for (int i = 0; i < upload_staging_buffers.blocks.size(); i++) {
-		driver->buffer_unmap(upload_staging_buffers.blocks[i].driver_id);
+	if (driver->api_trait_get(RDD::API_TRAIT_BUFFER_MAP_IS_SHADOW_COPY)) {
+		for (int i = 0; i < upload_staging_buffers.blocks.size(); i++) {
+			driver->buffer_unmap(upload_staging_buffers.blocks[i].driver_id);
+		}
 	}
 
 	// The command buffer must be copied into a stack variable as the driver workarounds can change the command buffer in use.
