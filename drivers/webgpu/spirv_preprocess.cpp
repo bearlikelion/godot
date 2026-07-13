@@ -58,6 +58,11 @@ Vector<uint8_t> inline_functions(const Vector<uint8_t> &p_bytes) {
 	opt.SetMessageConsumer([](spv_message_level_t, const char *, const spv_position_t &, const char *) {});
 	opt.RegisterPass(spvtools::CreateInlineExhaustivePass());
 	opt.RegisterPass(spvtools::CreateEliminateDeadFunctionsPass());
+	// Note: CreateDeadVariableEliminationPass is deliberately NOT run here.
+	// Removing unused resource variables also removes the WGSL declarations
+	// the driver mines for binding type information (texture dimensions,
+	// sampler comparison-ness); per-stage resource limits are handled with
+	// the BINDING_USED metadata emitted by tint_wrapper instead.
 
 	std::vector<uint32_t> out_words;
 	spvtools::OptimizerOptions options;

@@ -169,6 +169,14 @@ class RenderingDeviceDriverWebGPU : public RenderingDeviceDriver {
 	WGPUSampler dummy_filtering_sampler = nullptr;
 	WGPUSampler dummy_comparison_sampler = nullptr;
 
+	// Samplers created with any linear filter mode. Used to detect when a
+	// filtering sampler is bound to a NonFiltering layout slot (depth
+	// textures sampled without compare); a nearest substitute is bound
+	// instead so browser validation passes.
+	HashSet<uint64_t> filtering_samplers;
+	WGPUSampler nearest_sampler = nullptr;
+	WGPUSampler _nonfiltering_substitute(WGPUSampler p_sampler, const WGShader *p_shader, uint32_t p_set_index, uint32_t p_wgpu_binding);
+
 	// --- BGL Rebinding Helper ---
 	WGPUBindGroup _get_compatible_bind_group(WGUniformSet *p_us, WGShader *p_target_shader, uint32_t p_set_idx);
 
