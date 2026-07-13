@@ -53,6 +53,9 @@
 #ifdef VULKAN_ENABLED
 #include "wayland/rendering_context_driver_vulkan_wayland.h"
 #endif
+#ifdef WEBGPU_ENABLED
+#include "wayland/rendering_context_driver_webgpu_wayland.h"
+#endif
 
 #include "servers/rendering/renderer_rd/renderer_compositor_rd.h"
 #endif
@@ -927,12 +930,22 @@ void DisplayServerWayland::show_window(DisplayServerEnums::WindowID p_window_id)
 #ifdef VULKAN_ENABLED
 				RenderingContextDriverVulkanWayland::WindowPlatformData vulkan;
 #endif
+#ifdef WEBGPU_ENABLED
+				RenderingContextDriverWebGPUWayland::WindowPlatformData webgpu;
+#endif
 			} wpd;
 #ifdef VULKAN_ENABLED
 			if (rendering_driver == "vulkan") {
 				wpd.vulkan.surface = wayland_thread.window_get_wl_surface(wd.id);
 				ERR_FAIL_NULL(wpd.vulkan.surface);
 				wpd.vulkan.display = wayland_thread.get_wl_display();
+			}
+#endif
+#ifdef WEBGPU_ENABLED
+			if (rendering_driver == "webgpu") {
+				wpd.webgpu.surface = wayland_thread.window_get_wl_surface(wd.id);
+				ERR_FAIL_NULL(wpd.webgpu.surface);
+				wpd.webgpu.display = wayland_thread.get_wl_display();
 			}
 #endif
 			Error err = rendering_context->window_create(wd.id, &wpd);
@@ -2264,6 +2277,10 @@ Vector<String> DisplayServerWayland::get_rendering_drivers_func() {
 	drivers.push_back("vulkan");
 #endif
 
+#ifdef WEBGPU_ENABLED
+	drivers.push_back("webgpu");
+#endif
+
 #ifdef GLES3_ENABLED
 	drivers.push_back("opengl3");
 	drivers.push_back("opengl3_es");
@@ -2340,6 +2357,11 @@ DisplayServerWayland::DisplayServerWayland(const String &p_rendering_driver, Dis
 		rendering_context = memnew(RenderingContextDriverVulkanWayland);
 	}
 #endif // VULKAN_ENABLED
+#ifdef WEBGPU_ENABLED
+	if (rendering_driver == "webgpu") {
+		rendering_context = memnew(RenderingContextDriverWebGPUWayland);
+	}
+#endif // WEBGPU_ENABLED
 
 	if (rendering_context) {
 		if (rendering_context->initialize() != OK) {
