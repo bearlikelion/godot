@@ -189,8 +189,9 @@ void main() {
 		}
 	}
 
-	// WebGPU: force opaque alpha — Chrome may ignore CompositeAlphaMode_Opaque
-	// and compositing with alpha<1 produces transparent canvas output.
-	color.a = 1.0;
-
+	// Note: canvas/window opacity on WebGPU is handled by the driver, which
+	// strips alpha writes for swap-chain pipelines (the cleared alpha=1 is
+	// preserved). Forcing color.a = 1.0 here instead would break the
+	// NORMAL_ALPHA blend used by the boot splash (transparent pixels would
+	// paint their RGB at full strength).
 }

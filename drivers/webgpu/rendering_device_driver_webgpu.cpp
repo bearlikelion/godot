@@ -1542,6 +1542,15 @@ bool RenderingDeviceDriverWebGPU::buffer_get_data_direct(BufferID p_buffer, uint
 		wgpuBufferMapAsync(entry->staging, WGPUMapMode_Read, 0, entry->size, cb);
 	}
 
+#ifndef __EMSCRIPTEN__
+	// Native: block until the copy and map complete so the first call
+	// already returns real data (the editor relies on synchronous
+	// readback). The browser cannot block, hence the async pattern there.
+	for (uint32_t i = 0; i < 1000 && entry->map_pending && context_driver; i++) {
+		context_driver->poll_events(true);
+	}
+#endif
+
 	// Return previous frame's data if available, otherwise signal "not ready"
 	// by returning empty data (false → caller sees failure, not misleading zeros).
 	if (entry->has_data) {
@@ -2150,6 +2159,30 @@ Vector<uint8_t> RenderingDeviceDriverWebGPU::texture_get_data(TextureID p_textur
 	cb.callback = _readback_map_cb;
 	cb.userdata1 = entry;
 	wgpuBufferMapAsync(entry->staging, WGPUMapMode_Read, 0, entry->size, cb);
+
+#ifndef __EMSCRIPTEN__
+	// Native: block until the copy and map complete so the first call
+	// already returns real data (the editor relies on synchronous texture
+	// readback, e.g. Texture2D::get_image). The browser cannot block.
+	for (uint32_t i = 0; i < 1000 && entry->map_pending && context_driver; i++) {
+		context_driver->poll_events(true);
+	}
+	if (entry->has_data && entry->map_complete) {
+		Vector<uint8_t> result;
+		result.resize(mip_w * mip_h * rd_bpp);
+		if (gpu_bpp != rd_bpp) {
+			uint32_t dst_pitch = mip_w * rd_bpp;
+			texture_readback_convert(p_texture, entry->shadow, row_pitch, result.ptrw(), dst_pitch, mip_w, mip_h);
+		} else {
+			uint8_t *dst = result.ptrw();
+			for (uint32_t y = 0; y < mip_h; y++) {
+				memcpy(dst + y * mip_w * rd_bpp, entry->shadow + y * row_pitch, mip_w * rd_bpp);
+			}
+		}
+		entry->has_data = false;
+		return result;
+	}
+#endif
 
 	// Return empty on first call — signals "not ready" to the caller.
 	// Data will be available on the next call after frame_post_draw.
