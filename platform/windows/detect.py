@@ -292,7 +292,7 @@ def get_flags():
     return {
         "arch": arch,
         "d3d12": True,
-        "supported": ["d3d12", "dcomp", "library", "mono", "xaudio2"],
+        "supported": ["d3d12", "dcomp", "library", "mono", "webgpu", "xaudio2"],
     }
 
 
@@ -504,6 +504,12 @@ def configure_msvc(env: "SConsEnvironment"):
         env.AppendUnique(CPPDEFINES=["VULKAN_ENABLED", "RD_ENABLED"])
         if not env["use_volk"]:
             LIBS += ["vulkan"]
+
+    if env["webgpu"]:
+        # Native backend via wgpu-native (see drivers/webgpu/SCsub). Link
+        # requirements from wgpu-native's example CMake lists.
+        env.AppendUnique(CPPDEFINES=["WEBGPU_ENABLED", "WEBGPU_NATIVE_ENABLED", "RD_ENABLED"])
+        LIBS += ["d3dcompiler", "ws2_32", "userenv", "bcrypt", "ntdll", "opengl32", "propsys", "runtimeobject"]
 
     if env["sdl"]:
         env.Append(CPPDEFINES=["SDL_ENABLED"])
@@ -936,6 +942,12 @@ def configure_mingw(env: "SConsEnvironment"):
         env.Append(CPPDEFINES=["VULKAN_ENABLED", "RD_ENABLED"])
         if not env["use_volk"]:
             env.Append(LIBS=["vulkan"])
+
+    if env["webgpu"]:
+        # Native backend via wgpu-native (see drivers/webgpu/SCsub). Link
+        # requirements from wgpu-native's example CMake lists.
+        env.AppendUnique(CPPDEFINES=["WEBGPU_ENABLED", "WEBGPU_NATIVE_ENABLED", "RD_ENABLED"])
+        env.AppendUnique(LIBS=["d3dcompiler", "ws2_32", "userenv", "bcrypt", "ntdll", "opengl32", "propsys", "runtimeobject"])
 
     if env["sdl"]:
         env.Append(CPPDEFINES=["SDL_ENABLED"])

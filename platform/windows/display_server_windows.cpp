@@ -63,6 +63,9 @@
 #if defined(VULKAN_ENABLED)
 #include "rendering_context_driver_vulkan_windows.h"
 #endif
+#if defined(WEBGPU_ENABLED)
+#include "rendering_context_driver_webgpu_windows.h"
+#endif
 #if defined(D3D12_ENABLED)
 #include "drivers/d3d12/rendering_context_driver_d3d12.h"
 
@@ -7318,6 +7321,9 @@ Error DisplayServerWindows::_create_rendering_context_window(DisplayServerEnums:
 #ifdef VULKAN_ENABLED
 		RenderingContextDriverVulkanWindows::WindowPlatformData vulkan;
 #endif
+#ifdef WEBGPU_ENABLED
+		RenderingContextDriverWebGPUWindows::WindowPlatformData webgpu;
+#endif
 #ifdef D3D12_ENABLED
 		RenderingContextDriverD3D12::WindowPlatformData d3d12;
 #endif
@@ -7326,6 +7332,12 @@ Error DisplayServerWindows::_create_rendering_context_window(DisplayServerEnums:
 	if (p_rendering_driver == "vulkan") {
 		wpd.vulkan.window = wd.hWnd;
 		wpd.vulkan.instance = hInstance;
+	}
+#endif
+#ifdef WEBGPU_ENABLED
+	if (p_rendering_driver == "webgpu") {
+		wpd.webgpu.window = wd.hWnd;
+		wpd.webgpu.instance = hInstance;
 	}
 #endif
 #ifdef D3D12_ENABLED
@@ -7870,10 +7882,15 @@ DisplayServerWindows::DisplayServerWindows(const String &p_rendering_driver, Dis
 	fallback_to_vulkan = true; // Always enable fallback if engine was built w/o other driver support.
 #endif
 
-	String rendering_drivers[2];
+	String rendering_drivers[3];
 	uint32_t rendering_driver_count = 0;
 
-	if (rendering_driver == "d3d12") {
+	if (rendering_driver == "webgpu") {
+		rendering_drivers[rendering_driver_count++] = rendering_driver;
+		if (fallback_to_vulkan) {
+			rendering_drivers[rendering_driver_count++] = "vulkan";
+		}
+	} else if (rendering_driver == "d3d12") {
 		rendering_drivers[rendering_driver_count++] = rendering_driver;
 		if (fallback_to_vulkan) {
 			rendering_drivers[rendering_driver_count++] = "vulkan";
@@ -7895,6 +7912,11 @@ DisplayServerWindows::DisplayServerWindows(const String &p_rendering_driver, Dis
 		if (tested_rendering_driver == "vulkan") {
 			rendering_context = memnew(RenderingContextDriverVulkanWindows);
 			tested_drivers.set_flag(DRIVER_ID_RD_VULKAN);
+		}
+#endif
+#ifdef WEBGPU_ENABLED
+		if (tested_rendering_driver == "webgpu") {
+			rendering_context = memnew(RenderingContextDriverWebGPUWindows);
 		}
 #endif
 #ifdef D3D12_ENABLED
@@ -8230,6 +8252,9 @@ Vector<String> DisplayServerWindows::get_rendering_drivers_func() {
 
 #ifdef VULKAN_ENABLED
 	drivers.push_back("vulkan");
+#endif
+#ifdef WEBGPU_ENABLED
+	drivers.push_back("webgpu");
 #endif
 #ifdef D3D12_ENABLED
 	drivers.push_back("d3d12");

@@ -86,6 +86,9 @@
 #if defined(VULKAN_ENABLED)
 #import "rendering_context_driver_vulkan_macos.h"
 #endif
+#if defined(WEBGPU_ENABLED)
+#import "rendering_context_driver_webgpu_macos.h"
+#endif
 #if defined(METAL_ENABLED)
 #import "drivers/metal/rendering_context_driver_metal.h"
 #endif
@@ -189,6 +192,9 @@ DisplayServerEnums::WindowID DisplayServerMacOS::_create_window(DisplayServerEnu
 #ifdef VULKAN_ENABLED
 				RenderingContextDriverVulkanMacOS::WindowPlatformData vulkan;
 #endif
+#ifdef WEBGPU_ENABLED
+				RenderingContextDriverWebGPUMacOS::WindowPlatformData webgpu;
+#endif
 #ifdef METAL_ENABLED
 				RenderingContextDriverMetal::WindowPlatformData metal;
 #endif
@@ -196,6 +202,11 @@ DisplayServerEnums::WindowID DisplayServerMacOS::_create_window(DisplayServerEnu
 #ifdef VULKAN_ENABLED
 			if (rendering_driver == "vulkan") {
 				wpd.vulkan.layer_ptr = (CAMetalLayer *const *)&layer;
+			}
+#endif
+#ifdef WEBGPU_ENABLED
+			if (rendering_driver == "webgpu") {
+				wpd.webgpu.layer_ptr = (CAMetalLayer *const *)&layer;
 			}
 #endif
 #ifdef METAL_ENABLED
@@ -3506,6 +3517,9 @@ Vector<String> DisplayServerMacOS::get_rendering_drivers_func() {
 #if defined(VULKAN_ENABLED)
 	drivers.push_back("vulkan");
 #endif
+#if defined(WEBGPU_ENABLED)
+	drivers.push_back("webgpu");
+#endif
 #if defined(METAL_ENABLED)
 	drivers.push_back("metal");
 #endif
@@ -3802,6 +3816,11 @@ DisplayServerMacOS::DisplayServerMacOS(const String &p_rendering_driver, Display
 #endif
 	if (rendering_driver == "vulkan") {
 		rendering_context = memnew(RenderingContextDriverVulkanMacOS);
+	}
+#endif
+#if defined(WEBGPU_ENABLED)
+	if (rendering_driver == "webgpu") {
+		rendering_context = memnew(RenderingContextDriverWebGPUMacOS);
 	}
 #endif
 #if defined(METAL_ENABLED)

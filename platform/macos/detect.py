@@ -88,7 +88,7 @@ def get_flags():
         "arch": detect_arch(),
         "use_volk": False,
         "metal": True,
-        "supported": ["library", "metal", "mono"],
+        "supported": ["library", "metal", "mono", "webgpu"],
     }
 
 
@@ -316,6 +316,14 @@ def configure(env: "SConsEnvironment"):
         extra_frameworks.add("MetalKit")
         extra_frameworks.add("MetalFX")
         env.Prepend(CPPPATH=["#thirdparty/spirv-cross"])
+
+    if env["webgpu"]:
+        # Native backend via wgpu-native (see drivers/webgpu/SCsub).
+        env.AppendUnique(CPPDEFINES=["WEBGPU_ENABLED", "WEBGPU_NATIVE_ENABLED", "RD_ENABLED"])
+        extra_frameworks.add("Metal")
+        extra_frameworks.add("QuartzCore")
+        extra_frameworks.add("CoreFoundation")
+        extra_frameworks.add("Foundation")
 
     if env["vulkan"]:
         env.AppendUnique(CPPDEFINES=["VULKAN_ENABLED", "RD_ENABLED"])
