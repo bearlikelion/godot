@@ -41,6 +41,12 @@ scons platform=linuxbsd target=editor webgpu=yes
 bin/godot.linuxbsd.editor.x86_64 --rendering-driver webgpu --rendering-method mobile
 ```
 
+Windows and macOS builds follow the same pattern (`platform=windows` /
+`platform=macos` with `webgpu=yes`) but need a wgpu-native dist built for
+that target platform in `wgpu_native_dir` (`wgpu_native.lib` for MSVC,
+`libwgpu_native.a` for MinGW and macOS). X11 and Wayland are both wired
+on Linux; select with `--display-driver x11|wayland`.
+
 `webgpu_precompile_wgsl` defaults to `auto`: the build-time SPIR-V to WGSL
 table is generated for web builds only (it needs the `tint_convert_cli` and
 `glslangValidator` host tools). Native builds ship an empty table and rely on
