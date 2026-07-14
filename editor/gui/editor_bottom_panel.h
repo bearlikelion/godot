@@ -30,8 +30,7 @@
 
 #pragma once
 
-#include "editor/docks/dock_tab_container.h"
-#include "scene/gui/texture_progress_bar.h"
+#include "scene/gui/tab_container.h"
 
 class Button;
 class ConfigFile;
@@ -39,27 +38,15 @@ class EditorDock;
 class EditorToaster;
 class HBoxContainer;
 
-class ProgressIndicator : public TextureProgressBar {
-	GDCLASS(ProgressIndicator, TextureProgressBar);
-
-protected:
-	void _notification(int p_what);
-	static void _bind_methods();
-
-	virtual void gui_input(const Ref<InputEvent> &p_event) override;
-
-public:
-	ProgressIndicator();
-};
-
-class EditorBottomPanel : public DockTabContainer {
-	GDCLASS(EditorBottomPanel, DockTabContainer);
+class EditorBottomPanel : public TabContainer {
+	GDCLASS(EditorBottomPanel, TabContainer);
 
 	HBoxContainer *bottom_hbox = nullptr;
+	Control *icon_spacer = nullptr;
 	EditorToaster *editor_toaster = nullptr;
-	ProgressIndicator *progress_indicator = nullptr;
 	Button *pin_button = nullptr;
 	Button *expand_button = nullptr;
+	Popup *layout_popup = nullptr;
 
 	int previous_tab = -1;
 	bool lock_panel_switching = false;
@@ -80,14 +67,6 @@ protected:
 	void _notification(int p_what);
 
 public:
-	virtual void dock_closed(EditorDock *p_dock) override;
-	virtual void dock_focused(EditorDock *p_dock, bool p_was_visible) override;
-	virtual void update_visibility() override { show(); } // Never hide bottom panel.
-	virtual TabStyle get_tab_style() const override;
-	virtual bool can_switch_dock() const override;
-	virtual Rect2 get_floating_dock_rect(EditorDock *p_dock) override;
-	virtual void load_selected_tab(int p_idx) override;
-
 	void save_layout_to_config(Ref<ConfigFile> p_config_file, const String &p_section) const;
 	void load_layout_from_config(Ref<ConfigFile> p_config_file, const String &p_section);
 
@@ -99,8 +78,6 @@ public:
 	void set_expanded(bool p_expanded);
 	void _theme_changed();
 	bool is_locked() const { return lock_panel_switching; }
-
-	ProgressIndicator *get_progress_indicator() { return progress_indicator; }
 
 	void set_bottom_panel_offset(int p_offset);
 	int get_bottom_panel_offset();

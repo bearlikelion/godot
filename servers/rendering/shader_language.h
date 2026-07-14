@@ -38,9 +38,10 @@
 #include "core/templates/safe_refcount.h"
 #include "core/typedefs.h"
 #include "core/variant/variant.h"
+#include "scene/resources/shader_include.h"
 
 #ifdef DEBUG_ENABLED
-#include "servers/rendering/shader_warnings.h"
+#include "shader_warnings.h"
 #endif // DEBUG_ENABLED
 
 class ShaderLanguage {
@@ -183,10 +184,6 @@ public:
 		TK_HINT_SCREEN_TEXTURE,
 		TK_HINT_NORMAL_ROUGHNESS_TEXTURE,
 		TK_HINT_DEPTH_TEXTURE,
-		TK_HINT_BLIT_SOURCE0,
-		TK_HINT_BLIT_SOURCE1,
-		TK_HINT_BLIT_SOURCE2,
-		TK_HINT_BLIT_SOURCE3,
 		TK_FILTER_NEAREST,
 		TK_FILTER_LINEAR,
 		TK_FILTER_NEAREST_MIPMAP,
@@ -679,10 +676,6 @@ public:
 				HINT_DEFAULT_TRANSPARENT,
 				HINT_ANISOTROPY,
 				HINT_SCREEN_TEXTURE,
-				HINT_BLIT_SOURCE0,
-				HINT_BLIT_SOURCE1,
-				HINT_BLIT_SOURCE2,
-				HINT_BLIT_SOURCE3,
 				HINT_NORMAL_ROUGHNESS_TEXTURE,
 				HINT_DEPTH_TEXTURE,
 				HINT_MAX
@@ -711,6 +704,7 @@ public:
 			PackedStringArray hint_enum_names;
 			int instance_index = 0;
 			String group;
+			String subgroup;
 
 			_FORCE_INLINE_ bool is_texture() const {
 				// Order is assigned to -1 for texture uniforms.
@@ -1062,6 +1056,7 @@ private:
 	bool is_shader_inc = false;
 
 	String current_uniform_group_name;
+	String current_uniform_subgroup_name;
 
 	VaryingFunctionNames varying_function_names;
 	uint32_t base_varying_index = 0;

@@ -32,7 +32,6 @@
 
 #include "../gltf_defines.h"
 
-#include "core/variant/typed_array.h"
 #include "scene/resources/3d/importer_mesh.h"
 
 class GLTFMesh : public Resource {

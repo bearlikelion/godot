@@ -32,6 +32,7 @@
 
 #include "thread_jandroid.h"
 
+#include "core/os/os.h"
 #include "core/templates/local_vector.h"
 
 #include <unistd.h>

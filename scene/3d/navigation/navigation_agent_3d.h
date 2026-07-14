@@ -35,7 +35,6 @@
 #include "servers/navigation_3d/navigation_path_query_parameters_3d.h"
 #include "servers/navigation_3d/navigation_path_query_result_3d.h"
 
-class ArrayMesh;
 class Node3D;
 class StandardMaterial3D;
 

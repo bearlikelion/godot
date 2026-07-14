@@ -166,11 +166,6 @@ ivec2 multiview_uv(ivec2 uv) {
 layout(location = 14) out vec2 point_coord_interp;
 #endif
 
-// Effective instance index for instanced draw batching.
-// For non-multimesh: batch_instance_index + gl_InstanceIndex (supports N-instance batches).
-// For multimesh: batch_instance_index only (gl_InstanceIndex indexes multimesh data).
-layout(location = 10) flat out uint batch_instance_index;
-
 invariant gl_Position;
 
 #GLOBALS
@@ -701,11 +696,6 @@ void vertex_shader(in vec3 vertex,
 }
 
 void main() {
-	// Compute effective instance index for draw call batching.
-	// When batching is active, multiple instances share one push constant and
-	// gl_InstanceIndex provides the offset within the batch.
-	batch_instance_index = sc_multimesh() ? draw_call.instance_index : (draw_call.instance_index + uint(gl_InstanceIndex));
-
 #if defined(MODE_RENDER_MOTION_VECTORS)
 	vec3 prev_vertex;
 #ifdef NORMAL_USED
@@ -718,8 +708,8 @@ void main() {
 
 	_unpack_vertex_attributes(
 			previous_vertex_attrib,
-			instances.data[batch_instance_index].compressed_aabb_position_pad.xyz,
-			instances.data[batch_instance_index].compressed_aabb_size_pad.xyz,
+			instances.data[draw_call.instance_index].compressed_aabb_position_pad.xyz,
+			instances.data[draw_call.instance_index].compressed_aabb_size_pad.xyz,
 #if defined(NORMAL_USED) || defined(TANGENT_USED)
 			previous_normal_attrib,
 #ifdef NORMAL_USED
@@ -738,9 +728,9 @@ void main() {
 			prev_tangent,
 			prev_binormal,
 #endif
-			batch_instance_index, draw_call.multimesh_motion_vectors_previous_offset, instances.data[batch_instance_index].prev_transform,
+			draw_call.instance_index, draw_call.multimesh_motion_vectors_previous_offset, instances.data[draw_call.instance_index].prev_transform,
 #ifdef USE_DOUBLE_PRECISION
-			instances.data[batch_instance_index].prev_model_precision.xyz,
+			instances.data[draw_call.instance_index].prev_model_precision.xyz,
 			scene_data_block.prev_data.inv_view_precision,
 #endif
 
@@ -780,8 +770,8 @@ void main() {
 
 	_unpack_vertex_attributes(
 			vertex_angle_attrib,
-			instances.data[batch_instance_index].compressed_aabb_position_pad.xyz,
-			instances.data[batch_instance_index].compressed_aabb_size_pad.xyz,
+			instances.data[draw_call.instance_index].compressed_aabb_position_pad.xyz,
+			instances.data[draw_call.instance_index].compressed_aabb_size_pad.xyz,
 #if defined(NORMAL_USED) || defined(TANGENT_USED)
 			axis_tangent_attrib,
 #ifdef NORMAL_USED
@@ -800,9 +790,9 @@ void main() {
 			tangent,
 			binormal,
 #endif
-			batch_instance_index, draw_call.multimesh_motion_vectors_current_offset, instances.data[batch_instance_index].transform,
+			draw_call.instance_index, draw_call.multimesh_motion_vectors_current_offset, instances.data[draw_call.instance_index].transform,
 #ifdef USE_DOUBLE_PRECISION
-			instances.data[batch_instance_index].model_precision.xyz,
+			instances.data[draw_call.instance_index].model_precision.xyz,
 			scene_data_block.data.inv_view_precision,
 #endif
 #ifdef MODE_DUAL_PARABOLOID
@@ -978,9 +968,6 @@ ivec2 multiview_uv(ivec2 uv) {
 }
 #endif // !USE_MULTIVIEW
 
-// Effective instance index from vertex stage (supports instanced draw batching).
-layout(location = 10) flat in uint batch_instance_index;
-
 #if defined(POINT_SIZE_USED) && defined(POINT_COORD_USED)
 layout(location = 14) in vec2 point_coord_interp;
 #endif
@@ -1068,8 +1055,7 @@ hvec4 fog_process(vec3 vertex) {
 		float mip_level = mix(1.0 / MAX_ROUGHNESS_LOD, 1.0, 1.0 - (abs(vertex.z) - scene_data_block.data.z_near) / (scene_data_block.data.z_far - scene_data_block.data.z_near));
 #ifdef USE_RADIANCE_OCTMAP_ARRAY
 		float roughness_lod, blend;
-		roughness_lod = floor(mip_level * MAX_ROUGHNESS_LOD);
-		blend = mip_level * MAX_ROUGHNESS_LOD - roughness_lod;
+		blend = modf(mip_level * MAX_ROUGHNESS_LOD, roughness_lod);
 		float cube_lod = vec3_to_oct_lod(dFdx(cube_view), dFdy(cube_view), scene_data_block.data.radiance_pixel_size);
 		vec2 cube_uv = vec3_to_oct_with_border(cube_view, vec2(scene_data_block.data.radiance_border_size, 1.0 - scene_data_block.data.radiance_border_size * 2.0));
 		vec3 sky_sample_a = textureLod(sampler2DArray(radiance_octmap, DEFAULT_SAMPLER_LINEAR_WITH_MIPMAPS_CLAMP), vec3(cube_uv, roughness_lod), cube_lod).rgb;
@@ -1244,9 +1230,9 @@ void main() {
 			scene_data.inv_view_matrix[1],
 			scene_data.inv_view_matrix[2],
 			vec4(0.0, 0.0, 0.0, 1.0)));
-	mat4 read_model_matrix = transpose(mat4(instances.data[batch_instance_index].transform[0],
-			instances.data[batch_instance_index].transform[1],
-			instances.data[batch_instance_index].transform[2],
+	mat4 read_model_matrix = transpose(mat4(instances.data[draw_call.instance_index].transform[0],
+			instances.data[draw_call.instance_index].transform[1],
+			instances.data[draw_call.instance_index].transform[2],
 			vec4(0.0, 0.0, 0.0, 1.0)));
 
 #ifdef LIGHT_VERTEX_USED
@@ -1254,7 +1240,7 @@ void main() {
 #endif //LIGHT_VERTEX_USED
 
 	mat3 model_normal_matrix;
-	if (bool(instances.data[batch_instance_index].flags & INSTANCE_FLAGS_NON_UNIFORM_SCALE)) {
+	if (bool(instances.data[draw_call.instance_index].flags & INSTANCE_FLAGS_NON_UNIFORM_SCALE)) {
 		model_normal_matrix = transpose(inverse(mat3(read_model_matrix)));
 	} else {
 		model_normal_matrix = mat3(read_model_matrix);
@@ -1491,7 +1477,7 @@ void main() {
 	vec3 vertex_ddy = dFdy(vertex);
 
 	uint decal_count = sc_decals(8);
-	uvec2 decal_indices = instances.data[batch_instance_index].decals;
+	uvec2 decal_indices = instances.data[draw_call.instance_index].decals;
 	for (uint i = 0; i < decal_count; i++) {
 		uint decal_index = (i > 3) ? ((decal_indices.y >> ((i - 4) * 8)) & 0xFF) : ((decal_indices.x >> (i * 8)) & 0xFF);
 		if (decal_index == 0xFF) {
@@ -1617,8 +1603,7 @@ void main() {
 		ref_vec = hvec3(scene_data.radiance_inverse_xform * vec3(ref_vec));
 #ifdef USE_RADIANCE_OCTMAP_ARRAY
 		float lod;
-		lod = floor(float(sqrt(roughness) * MAX_ROUGHNESS_LOD));
-		half blend = half(float(sqrt(roughness) * MAX_ROUGHNESS_LOD) - lod);
+		half blend = half(modf(float(sqrt(roughness) * MAX_ROUGHNESS_LOD), lod));
 
 		float ref_lod = vec3_to_oct_lod(dFdx(vec3(ref_vec)), dFdy(vec3(ref_vec)), scene_data_block.data.radiance_pixel_size);
 		vec2 ref_uv = vec3_to_oct_with_border(ref_vec, vec2(scene_data_block.data.radiance_border_size, 1.0 - scene_data_block.data.radiance_border_size * 2.0));
@@ -1667,32 +1652,34 @@ void main() {
 	ambient_light = mix(ambient_light, custom_irradiance.rgb, custom_irradiance.a);
 #endif // CUSTOM_IRRADIANCE_USED
 #ifdef LIGHT_CLEARCOAT_USED
-	hvec3 cc_specular_light = hvec3(0.0);
-	hvec3 cc_ref_vec = hvec3(0.0);
 
 	if (sc_scene_use_reflection_cubemap()) {
-		cc_ref_vec = reflect(-view, geo_normal);
-		cc_ref_vec = mix(cc_ref_vec, geo_normal, mix(half(0.001), half(0.1), clearcoat_roughness));
+		half NoV = max(dot(geo_normal, view), half(0.0001));
+		hvec3 ref_vec = reflect(-view, geo_normal);
+		ref_vec = mix(ref_vec, geo_normal, clearcoat_roughness * clearcoat_roughness);
+		// The clear coat layer assumes an IOR of 1.5 (4% reflectance)
+		half Fc = clearcoat * (half(0.04) + half(0.96) * SchlickFresnel(NoV));
+		half attenuation = half(1.0) - Fc;
+		ambient_light *= attenuation;
+		indirect_specular_light *= attenuation;
 
-		hvec3 cc_radiance_ref_vec = hvec3(scene_data.radiance_inverse_xform * vec3(cc_ref_vec));
-		float roughness_lod = sqrt(mix(0.001, 0.1, float(clearcoat_roughness))) * MAX_ROUGHNESS_LOD;
+		half horizon = min(half(1.0) + dot(ref_vec, indirect_normal), half(1.0));
+		ref_vec = hvec3(scene_data.radiance_inverse_xform * vec3(ref_vec));
+		float roughness_lod = mix(0.001, 0.1, sqrt(float(clearcoat_roughness))) * MAX_ROUGHNESS_LOD;
 #ifdef USE_RADIANCE_OCTMAP_ARRAY
-
 		float lod;
-		lod = floor(roughness_lod);
-		half blend = half(roughness_lod - lod);
+		half blend = half(modf(roughness_lod, lod));
 
-		float ref_lod = vec3_to_oct_lod(dFdx(vec3(cc_radiance_ref_vec)), dFdy(vec3(cc_radiance_ref_vec)), scene_data_block.data.radiance_pixel_size);
-		vec2 ref_uv = vec3_to_oct_with_border(cc_radiance_ref_vec, vec2(scene_data_block.data.radiance_border_size, 1.0 - scene_data_block.data.radiance_border_size * 2.0));
+		float ref_lod = vec3_to_oct_lod(dFdx(vec3(ref_vec)), dFdy(vec3(ref_vec)), scene_data_block.data.radiance_pixel_size);
+		vec2 ref_uv = vec3_to_oct_with_border(ref_vec, vec2(scene_data_block.data.radiance_border_size, 1.0 - scene_data_block.data.radiance_border_size * 2.0));
 		hvec3 clearcoat_sample_a = hvec3(textureLod(sampler2DArray(radiance_octmap, DEFAULT_SAMPLER_LINEAR_WITH_MIPMAPS_CLAMP), vec3(ref_uv, lod), ref_lod).rgb);
 		hvec3 clearcoat_sample_b = hvec3(textureLod(sampler2DArray(radiance_octmap, DEFAULT_SAMPLER_LINEAR_WITH_MIPMAPS_CLAMP), vec3(ref_uv, lod + 1), ref_lod).rgb);
 		hvec3 clearcoat_light = mix(clearcoat_sample_a, clearcoat_sample_b, blend);
 #else
-		vec2 ref_uv = vec3_to_oct_with_border(cc_radiance_ref_vec, vec2(scene_data_block.data.radiance_border_size, 1.0 - scene_data_block.data.radiance_border_size * 2.0));
+		vec2 ref_uv = vec3_to_oct_with_border(ref_vec, vec2(scene_data_block.data.radiance_border_size, 1.0 - scene_data_block.data.radiance_border_size * 2.0));
 		hvec3 clearcoat_light = hvec3(textureLod(sampler2D(radiance_octmap, DEFAULT_SAMPLER_LINEAR_WITH_MIPMAPS_CLAMP), ref_uv, roughness_lod).rgb);
-
 #endif //USE_RADIANCE_OCTMAP_ARRAY
-		cc_specular_light += clearcoat_light * half(scene_data.IBL_exposure_normalization) * half(scene_data.ambient_light_color_energy.a);
+		indirect_specular_light += clearcoat_light * horizon * horizon * Fc * half(scene_data.ambient_light_color_energy.a);
 	}
 #endif // LIGHT_CLEARCOAT_USED
 #endif // !AMBIENT_LIGHT_DISABLED
@@ -1705,8 +1692,8 @@ void main() {
 #ifdef USE_LIGHTMAP
 
 	//lightmap
-	if (bool(instances.data[batch_instance_index].flags & INSTANCE_FLAGS_USE_LIGHTMAP_CAPTURE)) { //has lightmap capture
-		uint index = instances.data[batch_instance_index].gi_offset;
+	if (bool(instances.data[draw_call.instance_index].flags & INSTANCE_FLAGS_USE_LIGHTMAP_CAPTURE)) { //has lightmap capture
+		uint index = instances.data[draw_call.instance_index].gi_offset;
 
 		// The world normal.
 		hvec3 wnormal = hmat3(inv_view_matrix) * indirect_normal;
@@ -1731,12 +1718,12 @@ void main() {
 		ambient_light += c[2] * hvec3(lightmap_captures.data[index].sh[7].rgb) * wnormal.x * wnormal.z * norm;
 		ambient_light += c[4] * hvec3(lightmap_captures.data[index].sh[8].rgb) * (wnormal.x * wnormal.x - wnormal.y * wnormal.y) * norm;
 
-	} else if (bool(instances.data[batch_instance_index].flags & INSTANCE_FLAGS_USE_LIGHTMAP)) { // has actual lightmap
-		bool uses_sh = bool(instances.data[batch_instance_index].flags & INSTANCE_FLAGS_USE_SH_LIGHTMAP);
-		uint ofs = instances.data[batch_instance_index].gi_offset & 0xFFFF;
-		uint slice = instances.data[batch_instance_index].gi_offset >> 16;
+	} else if (bool(instances.data[draw_call.instance_index].flags & INSTANCE_FLAGS_USE_LIGHTMAP)) { // has actual lightmap
+		bool uses_sh = bool(instances.data[draw_call.instance_index].flags & INSTANCE_FLAGS_USE_SH_LIGHTMAP);
+		uint ofs = instances.data[draw_call.instance_index].gi_offset & 0xFFFF;
+		uint slice = instances.data[draw_call.instance_index].gi_offset >> 16;
 		vec3 uvw;
-		uvw.xy = uv2 * instances.data[batch_instance_index].lightmap_uv_scale.zw + instances.data[batch_instance_index].lightmap_uv_scale.xy;
+		uvw.xy = uv2 * instances.data[draw_call.instance_index].lightmap_uv_scale.zw + instances.data[draw_call.instance_index].lightmap_uv_scale.xy;
 		uvw.z = float(slice);
 
 		if (uses_sh) {
@@ -1784,9 +1771,6 @@ void main() {
 	if (reflection_probe_count > 0) {
 		hvec4 reflection_accum = hvec4(0.0);
 		hvec4 ambient_accum = hvec4(0.0);
-#ifdef LIGHT_CLEARCOAT_USED
-		hvec4 cc_reflection_accum = hvec4(0.0);
-#endif
 
 #ifdef LIGHT_ANISOTROPY_USED
 		// https://google.github.io/filament/Filament.html#lighting/imagebasedlights/anisotropy
@@ -1801,28 +1785,18 @@ void main() {
 		// Interpolate between mirror and rough reflection by using linear_roughness * linear_roughness.
 		ref_vec = mix(ref_vec, bent_normal, roughness * roughness * roughness * roughness);
 
-		uvec2 reflection_indices = instances.data[batch_instance_index].reflection_probes;
+		uvec2 reflection_indices = instances.data[draw_call.instance_index].reflection_probes;
 		for (uint i = 0; i < reflection_probe_count; i++) {
 			uint reflection_index = (i > 3) ? ((reflection_indices.y >> ((i - 4) * 8)) & 0xFF) : ((reflection_indices.x >> (i * 8)) & 0xFF);
 			if (reflection_index == 0xFF) {
 				break;
 			}
 
-#ifndef LIGHT_CLEARCOAT_USED
 			if (reflection_accum.a >= half(1.0) && ambient_accum.a >= half(1.0)) {
 				break;
 			}
-#else
-			if (reflection_accum.a >= half(1.0) && cc_reflection_accum.a >= half(1.0) && ambient_accum.a >= half(1.0)) {
-				break;
-			}
-#endif // LIGHT_CLEARCOAT_USED
 
-			reflection_process(reflection_index, vertex, ref_vec, normal, roughness, ambient_light,
-#ifdef LIGHT_CLEARCOAT_USED
-					cc_ref_vec, mix(half(0.001), half(0.1), clearcoat_roughness), cc_reflection_accum,
-#endif
-					ambient_accum, reflection_accum);
+			reflection_process(reflection_index, vertex, ref_vec, normal, roughness, ambient_light, indirect_specular_light, ambient_accum, reflection_accum);
 		}
 
 		if (ambient_accum.a < half(1.0)) {
@@ -1833,21 +1807,9 @@ void main() {
 			reflection_accum.rgb = indirect_specular_light * (half(1.0) - reflection_accum.a) + reflection_accum.rgb;
 		}
 
-#ifdef LIGHT_CLEARCOAT_USED
-		if (cc_reflection_accum.a < half(1.0)) {
-			cc_reflection_accum.rgb = cc_specular_light * (half(1.0) - reflection_accum.a) + cc_reflection_accum.rgb;
-		}
-#endif
-
 		if (reflection_accum.a > half(0.0)) {
 			indirect_specular_light = reflection_accum.rgb;
 		}
-
-#ifdef LIGHT_CLEARCOAT_USED
-		if (cc_reflection_accum.a > half(0.0)) {
-			cc_specular_light = cc_reflection_accum.rgb;
-		}
-#endif
 
 #if !defined(USE_LIGHTMAP)
 		if (ambient_accum.a > half(0.0)) {
@@ -1886,14 +1848,6 @@ void main() {
 	//this saves some VGPRs
 	hvec3 f0 = F0(metallic, specular, albedo);
 
-#ifdef LIGHT_CLEARCOAT_USED
-	// The base layer's f0 is computed assuming an interface from air to an IOR
-	// of 1.5, but the clear coat layer forms an interface from IOR 1.5 to IOR
-	// 1.5. We recompute f0 by first computing its IOR, then reconverting to f0
-	// by using the correct interface
-	f0 = mix(f0, f0_Clear_Coat_To_Surface(f0), clearcoat);
-#endif
-
 #ifndef AMBIENT_LIGHT_DISABLED
 	{
 #if defined(DIFFUSE_TOON)
@@ -1913,23 +1867,7 @@ void main() {
 		hvec2 env = hvec2(-1.04, 1.04) * a004 + r.zw;
 
 		indirect_specular_light *= env.x * f0 + env.y * clamp(half(50.0) * f0.g, metallic, half(1.0));
-
-#ifdef LIGHT_CLEARCOAT_USED
-		half geo_NdotV = max(dot(geo_normal, view), half(0.0001)); // We want to use geometric normal, not normal_map
-		// The clearcoat layer assumes an IOR of 1.5 (4% reflectance).
-		// Attenuate underlying diffuse/specular by clearcoat fresnel (ONLY fresnel, hence we don't just invert the BRDF below).
-		half NdotV5 = SchlickFresnel(geo_NdotV);
-		half F = mix(half(0.04), half(1.0), NdotV5) * clearcoat;
-		half cc_attenuation = half(1.0) - F;
-
-		ambient_light *= cc_attenuation;
-		indirect_specular_light *= cc_attenuation;
-
-		// We don't need a BRDF approximation for clearcoat, so we can use the fresnel directly.
-		indirect_specular_light += cc_specular_light * F;
 #endif
-
-#endif // DIFFUSE_TOON
 	}
 
 #endif // !AMBIENT_LIGHT_DISABLED
@@ -1953,13 +1891,13 @@ void main() {
 #ifdef USE_LIGHTMAP
 		uint shadowmask_mode = LIGHTMAP_SHADOWMASK_MODE_NONE;
 
-		if (bool(instances.data[batch_instance_index].flags & INSTANCE_FLAGS_USE_LIGHTMAP)) {
-			const uint ofs = instances.data[batch_instance_index].gi_offset & 0xFFFF;
+		if (bool(instances.data[draw_call.instance_index].flags & INSTANCE_FLAGS_USE_LIGHTMAP)) {
+			const uint ofs = instances.data[draw_call.instance_index].gi_offset & 0xFFFF;
 			shadowmask_mode = lightmaps.data[ofs].flags;
 
 			if (shadowmask_mode != LIGHTMAP_SHADOWMASK_MODE_NONE) {
-				const uint slice = instances.data[batch_instance_index].gi_offset >> 16;
-				const vec2 scaled_uv = uv2 * instances.data[batch_instance_index].lightmap_uv_scale.zw + instances.data[batch_instance_index].lightmap_uv_scale.xy;
+				const uint slice = instances.data[draw_call.instance_index].gi_offset >> 16;
+				const vec2 scaled_uv = uv2 * instances.data[draw_call.instance_index].lightmap_uv_scale.zw + instances.data[draw_call.instance_index].lightmap_uv_scale.xy;
 				const vec3 uvw = vec3(scaled_uv, float(slice));
 
 				if (sc_use_lightmap_bicubic_filter()) {
@@ -1979,11 +1917,11 @@ void main() {
 #else
 		for (uint i = 0; i < directional_lights_count; i++) {
 #endif
-				if (!bool(directional_lights.data[i].mask & instances.data[batch_instance_index].layer_mask)) {
+				if (!bool(directional_lights.data[i].mask & instances.data[draw_call.instance_index].layer_mask)) {
 					continue; //not masked
 				}
 
-				if (directional_lights.data[i].bake_mode == LIGHT_BAKE_STATIC && bool(instances.data[batch_instance_index].flags & INSTANCE_FLAGS_USE_LIGHTMAP)) {
+				if (directional_lights.data[i].bake_mode == LIGHT_BAKE_STATIC && bool(instances.data[draw_call.instance_index].flags & INSTANCE_FLAGS_USE_LIGHTMAP)) {
 					continue; // Statically baked light and object uses lightmap, skip.
 				}
 
@@ -2117,11 +2055,11 @@ void main() {
 #ifndef USE_VERTEX_LIGHTING
 		uint directional_lights_count = sc_directional_lights(scene_data.directional_light_count);
 		for (uint i = 0; i < directional_lights_count; i++) {
-			if (!bool(directional_lights.data[i].mask & instances.data[batch_instance_index].layer_mask)) {
+			if (!bool(directional_lights.data[i].mask & instances.data[draw_call.instance_index].layer_mask)) {
 				continue; //not masked
 			}
 
-			if (directional_lights.data[i].bake_mode == LIGHT_BAKE_STATIC && bool(instances.data[batch_instance_index].flags & INSTANCE_FLAGS_USE_LIGHTMAP)) {
+			if (directional_lights.data[i].bake_mode == LIGHT_BAKE_STATIC && bool(instances.data[draw_call.instance_index].flags & INSTANCE_FLAGS_USE_LIGHTMAP)) {
 				continue; // Statically baked light and object uses lightmap, skip.
 			}
 
@@ -2182,7 +2120,7 @@ void main() {
 
 #ifndef USE_VERTEX_LIGHTING
 	uint omni_light_count = sc_omni_lights(8);
-	uvec2 omni_indices = instances.data[batch_instance_index].omni_lights;
+	uvec2 omni_indices = instances.data[draw_call.instance_index].omni_lights;
 	for (uint i = 0; i < omni_light_count; i++) {
 		uint light_index = (i > 3) ? ((omni_indices.y >> ((i - 4) * 8)) & 0xFF) : ((omni_indices.x >> (i * 8)) & 0xFF);
 		if (i > 0 && light_index == 0xFF) {
@@ -2214,7 +2152,7 @@ void main() {
 	}
 
 	uint spot_light_count = sc_spot_lights(8);
-	uvec2 spot_indices = instances.data[batch_instance_index].spot_lights;
+	uvec2 spot_indices = instances.data[draw_call.instance_index].spot_lights;
 	for (uint i = 0; i < spot_light_count; i++) {
 		uint light_index = (i > 3) ? ((spot_indices.y >> ((i - 4) * 8)) & 0xFF) : ((spot_indices.x >> (i * 8)) & 0xFF);
 		if (i > 0 && light_index == 0xFF) {
@@ -2222,38 +2160,6 @@ void main() {
 		}
 
 		light_process_spot(light_index, vertex, view, normal, vertex_ddx, vertex_ddy, f0, roughness, metallic, scene_data.taa_frame_count, albedo, alpha, screen_uv, hvec3(1.0),
-#ifdef LIGHT_BACKLIGHT_USED
-				backlight,
-#endif
-/*
-#ifdef LIGHT_TRANSMITTANCE_USED
-				transmittance_color,
-				transmittance_depth,
-				transmittance_boost,
-#endif
-*/
-#ifdef LIGHT_RIM_USED
-				rim,
-				rim_tint,
-#endif
-#ifdef LIGHT_CLEARCOAT_USED
-				clearcoat, clearcoat_roughness, geo_normal,
-#endif // LIGHT_CLEARCOAT_USED
-#ifdef LIGHT_ANISOTROPY_USED
-				binormal, tangent, anisotropy,
-#endif
-				diffuse_light, direct_specular_light);
-	}
-
-	uint area_light_count = sc_area_lights(8);
-	uvec2 area_indices = instances.data[draw_call.instance_index].area_lights;
-	for (uint i = 0; i < area_light_count; i++) {
-		uint light_index = (i > 3) ? ((area_indices.y >> ((i - 4) * 8)) & 0xFF) : ((area_indices.x >> (i * 8)) & 0xFF);
-		if (i > 0 && light_index == 0xFF) {
-			break;
-		}
-
-		light_process_area(light_index, vertex, view, normal, vertex_ddx, vertex_ddy, f0, roughness, metallic, scene_data.taa_frame_count, albedo, alpha, screen_uv, hvec3(1.0),
 #ifdef LIGHT_BACKLIGHT_USED
 				backlight,
 #endif

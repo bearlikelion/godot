@@ -30,9 +30,6 @@
 
 #include "editor_toaster.h"
 
-#include "core/object/callable_mp.h"
-#include "core/object/class_db.h"
-#include "core/object/message_queue.h"
 #include "editor/editor_string_names.h"
 #include "editor/settings/editor_settings.h"
 #include "editor/themes/editor_scale.h"
@@ -40,7 +37,6 @@
 #include "scene/gui/label.h"
 #include "scene/gui/panel_container.h"
 #include "scene/resources/style_box_flat.h"
-#include "servers/display/display_server.h"
 
 EditorToaster *EditorToaster::singleton = nullptr;
 
@@ -168,7 +164,7 @@ void EditorToaster::_error_handler_impl(const String &p_file, int p_line, const 
 	bool in_dev = false;
 #endif
 
-	int show_all_setting = EDITOR_GET("interface/editor/behavior/show_internal_errors_in_toast_notifications");
+	int show_all_setting = EDITOR_GET("interface/editor/show_internal_errors_in_toast_notifications");
 
 	if (p_editor_notify || (show_all_setting == 0 && in_dev) || show_all_setting == 1) {
 		String err_str = !p_errorexp.is_empty() ? p_errorexp : p_error;

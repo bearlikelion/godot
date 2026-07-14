@@ -31,7 +31,7 @@
 #pragma once
 
 #include "core/extension/gdextension_library_loader.h"
-#include "editor/export/editor_export_plugin.h"
+#include "editor/export/editor_export.h"
 
 class GDExtensionExportPlugin : public EditorExportPlugin {
 	GDSOFTCLASS(GDExtensionExportPlugin, EditorExportPlugin);

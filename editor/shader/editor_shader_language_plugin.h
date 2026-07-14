@@ -30,7 +30,7 @@
 
 #pragma once
 
-#include "editor/shader/shader_editor.h"
+#include "shader_editor.h"
 
 class EditorShaderLanguagePlugin : public RefCounted {
 	GDCLASS(EditorShaderLanguagePlugin, RefCounted);

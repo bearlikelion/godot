@@ -30,8 +30,8 @@
 
 #pragma once
 
-#include "core/io/file_access.h"
-#include "core/io/file_access_memory.h"
+#include "file_access.h"
+#include "file_access_memory.h"
 
 class FileAccessPatched : public FileAccess {
 	GDSOFTCLASS(FileAccessPatched, FileAccess);

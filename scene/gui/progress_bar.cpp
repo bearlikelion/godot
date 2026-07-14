@@ -30,12 +30,9 @@
 
 #include "progress_bar.h"
 
-#include "core/config/engine.h"
-#include "core/object/class_db.h"
 #include "core/string/translation_server.h"
 #include "scene/resources/text_line.h"
 #include "scene/theme/theme_db.h"
-#include "servers/display/accessibility_server.h"
 
 Size2 ProgressBar::get_minimum_size() const {
 	Size2 minimum_size = theme_cache.background_style->get_minimum_size();
@@ -63,7 +60,7 @@ void ProgressBar::_notification(int p_what) {
 			RID ae = get_accessibility_element();
 			ERR_FAIL_COND(ae.is_null());
 
-			AccessibilityServer::get_singleton()->update_set_role(ae, AccessibilityServerEnums::AccessibilityRole::ROLE_PROGRESS_INDICATOR);
+			DisplayServer::get_singleton()->accessibility_update_set_role(ae, DisplayServer::AccessibilityRole::ROLE_PROGRESS_INDICATOR);
 		} break;
 
 		case NOTIFICATION_DRAW: {
@@ -193,7 +190,8 @@ void ProgressBar::_notification(int p_what) {
 void ProgressBar::_validate_property(PropertyInfo &p_property) const {
 	if (Engine::get_singleton()->is_editor_hint() && indeterminate && p_property.name == "show_percentage") {
 		p_property.usage |= PROPERTY_USAGE_READ_ONLY;
-	} else if (!indeterminate && p_property.name == "editor_preview_indeterminate") {
+	}
+	if (!indeterminate && p_property.name == "editor_preview_indeterminate") {
 		p_property.usage = PROPERTY_USAGE_NONE;
 	}
 }

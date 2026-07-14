@@ -30,8 +30,6 @@
 
 #include "shader_editor_plugin.h"
 
-#include "core/io/resource_loader.h"
-#include "core/object/callable_mp.h"
 #include "editor/docks/editor_dock_manager.h"
 #include "editor/docks/filesystem_dock.h"
 #include "editor/docks/inspector_dock.h"
@@ -40,15 +38,14 @@
 #include "editor/editor_undo_redo_manager.h"
 #include "editor/gui/window_wrapper.h"
 #include "editor/settings/editor_command_palette.h"
-#include "editor/settings/editor_settings.h"
 #include "editor/shader/shader_create_dialog.h"
 #include "editor/shader/text_shader_editor.h"
 #include "editor/shader/text_shader_language_plugin.h"
+#include "editor/shader/visual_shader_language_plugin.h"
 #include "editor/themes/editor_scale.h"
 #include "scene/gui/item_list.h"
 #include "scene/gui/tab_container.h"
 #include "scene/gui/texture_rect.h"
-#include "servers/display/display_server.h"
 
 Ref<Resource> ShaderEditorPlugin::_get_current_shader() {
 	int index = shader_tabs->get_current_tab();
@@ -150,7 +147,7 @@ void ShaderEditorPlugin::edit(Object *p_object) {
 			if (edited_shaders[i].shader_inc.ptr() == shader_include) {
 				shader_tabs->set_current_tab(i);
 				shader_list->select(i);
-				_switch_to_editor(edited_shaders[i].shader_editor);
+				_switch_to_editor(edited_shaders[i].shader_editor, true);
 				return;
 			}
 		}
@@ -170,7 +167,7 @@ void ShaderEditorPlugin::edit(Object *p_object) {
 			if (edited_shaders[i].shader.ptr() == shader) {
 				shader_tabs->set_current_tab(i);
 				shader_list->select(i);
-				_switch_to_editor(edited_shaders[i].shader_editor);
+				_switch_to_editor(edited_shaders[i].shader_editor, true);
 				return;
 			}
 		}
@@ -203,7 +200,7 @@ void ShaderEditorPlugin::edit(Object *p_object) {
 	shader_tabs->set_current_tab(shader_tabs->get_tab_count() - 1);
 	edited_shaders.push_back(es);
 	_update_shader_list();
-	_switch_to_editor(es.shader_editor);
+	_switch_to_editor(es.shader_editor, !restoring_layout);
 }
 
 bool ShaderEditorPlugin::handles(Object *p_object) const {
@@ -212,15 +209,7 @@ bool ShaderEditorPlugin::handles(Object *p_object) const {
 
 void ShaderEditorPlugin::make_visible(bool p_visible) {
 	if (p_visible) {
-		shader_dock->open();
-	}
-}
-
-void ShaderEditorPlugin::set_current() {
-	shader_dock->make_visible();
-	TextShaderEditor *text_shader_editor = Object::cast_to<TextShaderEditor>(shader_tabs->get_current_tab_control());
-	if (text_shader_editor) {
-		text_shader_editor->get_code_editor()->get_text_editor()->grab_focus();
+		shader_dock->make_visible();
 	}
 }
 
@@ -234,6 +223,8 @@ ShaderEditor *ShaderEditorPlugin::get_shader_editor(const Ref<Shader> &p_for_sha
 }
 
 void ShaderEditorPlugin::set_window_layout(Ref<ConfigFile> p_layout) {
+	restoring_layout = true;
+
 	if (!bool(EDITOR_GET("editors/shader_editor/behavior/files/restore_shaders_on_load"))) {
 		return;
 	}
@@ -269,6 +260,8 @@ void ShaderEditorPlugin::set_window_layout(Ref<ConfigFile> p_layout) {
 	_shader_selected(selected_shader_idx, false);
 
 	_set_text_shader_zoom_factor(p_layout->get_value("ShaderEditor", "text_shader_zoom_factor", 1.0f));
+
+	restoring_layout = false;
 }
 
 void ShaderEditorPlugin::get_window_layout(Ref<ConfigFile> p_layout) {
@@ -676,12 +669,6 @@ Variant ShaderEditorPlugin::get_drag_data_fw(const Point2 &p_point, Control *p_f
 	drag_data["type"] = "shader_list_element";
 	drag_data["shader_list_element"] = idx;
 
-	Ref<Resource> shader = edited_shaders[idx].shader;
-	if (shader.is_null()) {
-		shader = edited_shaders[idx].shader_inc;
-	}
-	drag_data["file_path"] = shader->get_path();
-
 	return drag_data;
 }
 
@@ -777,7 +764,7 @@ void ShaderEditorPlugin::_update_shader_editor_zoom_factor(CodeTextEditor *p_sha
 	}
 }
 
-void ShaderEditorPlugin::_switch_to_editor(ShaderEditor *p_editor) {
+void ShaderEditorPlugin::_switch_to_editor(ShaderEditor *p_editor, bool p_focus) {
 	ERR_FAIL_NULL(p_editor);
 	if (file_menu->get_parent() != nullptr) {
 		file_menu->get_parent()->remove_child(file_menu);
@@ -786,6 +773,13 @@ void ShaderEditorPlugin::_switch_to_editor(ShaderEditor *p_editor) {
 	shader_tabs->show();
 	p_editor->use_menu_bar(file_menu);
 	file_menu->set_v_size_flags(Control::SIZE_EXPAND_FILL);
+
+	if (p_focus) {
+		TextShaderEditor *text_shader_editor = Object::cast_to<TextShaderEditor>(p_editor);
+		if (text_shader_editor) {
+			text_shader_editor->get_code_editor()->get_text_editor()->grab_focus();
+		}
+	}
 }
 
 void ShaderEditorPlugin::_file_removed(const String &p_removed_file) {
@@ -849,7 +843,7 @@ void ShaderEditorPlugin::shortcut_input(const Ref<InputEvent> &p_event) {
 	}
 
 	if (make_floating_shortcut.is_valid() && make_floating_shortcut->matches_event(p_event)) {
-		shader_dock->make_floating();
+		EditorDockManager::get_singleton()->make_dock_floating(shader_dock);
 	}
 }
 
@@ -878,7 +872,6 @@ ShaderEditorPlugin::ShaderEditorPlugin() {
 	files_split = memnew(HSplitContainer);
 	files_split->set_split_offset(200 * EDSCALE);
 	files_split->set_v_size_flags(Control::SIZE_EXPAND_FILL);
-	files_split->set_drag_nested_intersections(true);
 	shader_dock->add_child(files_split);
 
 	context_menu = memnew(PopupMenu);
@@ -927,6 +920,10 @@ ShaderEditorPlugin::ShaderEditorPlugin() {
 	Ref<TextShaderLanguagePlugin> text_shader_lang;
 	text_shader_lang.instantiate();
 	EditorShaderLanguagePlugin::register_shader_language(text_shader_lang);
+
+	Ref<VisualShaderLanguagePlugin> visual_shader_lang;
+	visual_shader_lang.instantiate();
+	EditorShaderLanguagePlugin::register_shader_language(visual_shader_lang);
 }
 
 ShaderEditorPlugin::~ShaderEditorPlugin() {

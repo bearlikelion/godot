@@ -35,15 +35,12 @@
 #include "shapes/jolt_custom_ray_shape.h"
 #include "shapes/jolt_custom_user_data_shape.h"
 
-#include "core/os/memory.h"
-
-#ifdef JPH_ENABLE_ASSERTS
+#include "core/string/print_string.h"
 #include "core/variant/variant.h"
-#endif
 
-#include <Jolt/Jolt.h>
+#include "Jolt/Jolt.h"
 
-#include <Jolt/RegisterTypes.h>
+#include "Jolt/RegisterTypes.h"
 
 #include <cstdarg>
 

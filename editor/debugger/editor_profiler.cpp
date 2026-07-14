@@ -31,7 +31,6 @@
 #include "editor_profiler.h"
 
 #include "core/io/image.h"
-#include "core/object/callable_mp.h"
 #include "core/string/translation_server.h"
 #include "editor/editor_string_names.h"
 #include "editor/run/editor_run_bar.h"
@@ -39,7 +38,6 @@
 #include "editor/themes/editor_scale.h"
 #include "scene/gui/check_box.h"
 #include "scene/gui/flow_container.h"
-#include "scene/gui/label.h"
 #include "scene/resources/image_texture.h"
 
 void EditorProfiler::_make_metric_ptrs(Metric &m) {
@@ -51,7 +49,7 @@ void EditorProfiler::_make_metric_ptrs(Metric &m) {
 	}
 }
 
-const EditorProfiler::Metric &EditorProfiler::_get_frame_metric(int index) const {
+EditorProfiler::Metric EditorProfiler::_get_frame_metric(int index) {
 	return frame_metrics[(frame_metrics.size() + last_metric - (total_metrics - 1) + index) % frame_metrics.size()];
 }
 

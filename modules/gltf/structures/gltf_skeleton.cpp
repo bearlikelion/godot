@@ -32,7 +32,6 @@
 
 #include "../gltf_template_convert.h"
 
-#include "core/object/class_db.h"
 #include "scene/3d/bone_attachment_3d.h"
 
 void GLTFSkeleton::_bind_methods() {

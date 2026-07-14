@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2022 - 2026 ThorVG project. All rights reserved.
+ * Copyright (c) 2022 - 2024 the ThorVG project. All rights reserved.
 
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -25,9 +25,10 @@
 
 #include "tvgSvgLoaderCommon.h"
 
+void cssCopyStyleAttr(SvgNode* to, const SvgNode* from);
 SvgNode* cssFindStyleNode(const SvgNode* style, const char* title, SvgNodeType type);
 SvgNode* cssFindStyleNode(const SvgNode* style, const char* title);
 void cssUpdateStyle(SvgNode* doc, SvgNode* style);
-void cssCopyStyleAttr(SvgNode* to, const SvgNode* from, bool overwrite = false);
+void cssApplyStyleToPostponeds(Array<SvgNodeIdPair>& postponeds, SvgNode* style);
 
 #endif //_TVG_SVG_CSS_STYLE_H_

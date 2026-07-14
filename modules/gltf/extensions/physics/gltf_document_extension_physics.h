@@ -31,6 +31,8 @@
 #pragma once
 
 #include "../gltf_document_extension.h"
+#include "gltf_physics_body.h"
+#include "gltf_physics_shape.h"
 
 class GLTFDocumentExtensionPhysics : public GLTFDocumentExtension {
 	GDCLASS(GLTFDocumentExtensionPhysics, GLTFDocumentExtension);

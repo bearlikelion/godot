@@ -24,6 +24,7 @@
 #define _TVG_ANIMATION_H_
 
 #include "tvgCommon.h"
+#include "tvgPaint.h"
 #include "tvgPicture.h"
 
 struct Animation::Impl
@@ -32,13 +33,15 @@ struct Animation::Impl
 
     Impl()
     {
-        picture = Picture::gen();
-        picture->ref();
+        picture = Picture::gen().release();
+        PP(picture)->ref();
     }
 
     ~Impl()
     {
-        picture->unref();
+        if (PP(picture)->unref() == 0) {
+            delete(picture);
+        }
     }
 };
 

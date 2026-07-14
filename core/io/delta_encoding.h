@@ -30,12 +30,7 @@
 
 #pragma once
 
-#include "core/templates/span.h"
-
-#include <cstdint>
-
-template <typename T>
-class Vector;
+#include "core/io/file_access.h"
 
 class DeltaEncoding {
 public:

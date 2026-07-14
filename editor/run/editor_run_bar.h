@@ -30,17 +30,16 @@
 
 #pragma once
 
-#include "core/os/process_id.h"
+#include "editor/export/editor_export.h"
 #include "editor/run/editor_run.h"
 #include "scene/gui/margin_container.h"
 
-class AcceptDialog;
 class Button;
-class EditorExportPreset;
 class EditorRunNative;
-class HBoxContainer;
 class MenuButton;
 class PanelContainer;
+class HBoxContainer;
+class AcceptDialog;
 
 class EditorRunBar : public MarginContainer {
 	GDCLASS(EditorRunBar, MarginContainer);
@@ -130,9 +129,9 @@ public:
 
 	Error start_native_device(int p_device_id) const;
 
-	ProcessID has_child_process(ProcessID p_pid) const;
-	void stop_child_process(ProcessID p_pid);
-	ProcessID get_current_process() const;
+	OS::ProcessID has_child_process(OS::ProcessID p_pid) const;
+	void stop_child_process(OS::ProcessID p_pid);
+	OS::ProcessID get_current_process() const;
 
 	void set_movie_maker_enabled(bool p_enabled);
 	bool is_movie_maker_enabled() const;

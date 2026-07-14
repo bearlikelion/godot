@@ -913,7 +913,6 @@ static const char *language_list[][2] = {
 	{ "tmh", "Tamashek" },
 	{ "tn", "Tswana" },
 	{ "to", "Tongan" },
-	{ "tok", "Toki Pona" },
 	{ "tog", "Nyasa Tonga" },
 	{ "tpi", "Tok Pisin" },
 	{ "tr", "Turkish" },

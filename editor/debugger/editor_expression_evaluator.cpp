@@ -30,7 +30,6 @@
 
 #include "editor_expression_evaluator.h"
 
-#include "core/object/callable_mp.h"
 #include "editor/debugger/editor_debugger_inspector.h"
 #include "editor/debugger/script_editor_debugger.h"
 #include "editor/editor_string_names.h"

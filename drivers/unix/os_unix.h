@@ -33,6 +33,7 @@
 #ifdef UNIX_ENABLED
 
 #include "core/os/os.h"
+#include "drivers/unix/ip_unix.h"
 
 #if defined(__GLIBC__) || defined(WEB_ENABLED)
 #include <iconv.h>
@@ -46,7 +47,7 @@ typedef void *gd_iconv_t;
 typedef gd_iconv_t (*PIConvOpen)(const char *, const char *);
 typedef size_t (*PIConv)(gd_iconv_t, char **, size_t *, char **, size_t *);
 typedef int (*PIConvClose)(gd_iconv_t);
-typedef const char *(*PIConvLocaleCharset)();
+typedef const char *(*PIConvLocaleCharset)(void);
 #endif
 
 class OS_Unix : public OS {
@@ -140,8 +141,6 @@ public:
 
 	virtual String get_executable_path() const override;
 	virtual String get_user_data_dir(const String &p_user_dir) const override;
-
-	virtual String expand_path(const String &p_path) const override;
 };
 
 class UnixTerminalLogger : public StdLogger {

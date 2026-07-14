@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2020 - 2026 ThorVG project. All rights reserved.
+ * Copyright (c) 2020 - 2024 the ThorVG project. All rights reserved.
 
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -22,7 +22,9 @@
 
 #include "config.h"
 #include <cmath>
-#include "tvgCommon.h"
+#include <cstdlib>
+#include <cstring>
+#include <memory.h>
 #include "tvgMath.h"
 #include "tvgStr.h"
 
@@ -55,13 +57,13 @@ namespace tvg {
  * No hexadecimal form supported
  * no sequence supported after NAN
  */
-float toFloat(const char *str, char **end)
+float strToFloat(const char *nPtr, char **endPtr)
 {
-    if (end) *end = (char *) (str);
-    if (!str) return 0.0f;
+    if (endPtr) *endPtr = (char *) (nPtr);
+    if (!nPtr) return 0.0f;
 
-    auto a = str;
-    auto iter = str;
+    auto a = nPtr;
+    auto iter = nPtr;
     auto val = 0.0f;
     unsigned long long integerPart = 0;
     int minus = 1;
@@ -87,7 +89,7 @@ float toFloat(const char *str, char **end)
                 iter += 5;
             else goto error;
         }
-        if (end) *end = (char *) (iter);
+        if (endPtr) *endPtr = (char *) (iter);
         return (minus == -1) ? -INFINITY : INFINITY;
     }
 
@@ -95,7 +97,7 @@ float toFloat(const char *str, char **end)
         if ((tolower(*(iter + 1)) == 'a') && (tolower(*(iter + 2)) == 'n')) iter += 3;
         else goto error;
 
-        if (end) *end = (char *) (iter);
+        if (endPtr) *endPtr = (char *) (iter);
         return (minus == -1) ? -NAN : NAN;
     }
 
@@ -164,7 +166,7 @@ float toFloat(const char *str, char **end)
                 exponentPart = exponentPart * 10U + static_cast<unsigned int>(*iter - '0');
             }
         } else if (!isdigit(*(a - 1))) {
-            a = str;
+            a = nPtr;
             goto success;
         } else if (*iter == 0) {
             goto success;
@@ -190,51 +192,43 @@ float toFloat(const char *str, char **end)
             exponentPart--;
         }
         val = (minus_e == -1) ? (val / scale) : (val * scale);
-    } else if ((iter > str) && !isdigit(*(iter - 1))) {
-        a = str;
+    } else if ((iter > nPtr) && !isdigit(*(iter - 1))) {
+        a = nPtr;
         goto success;
     }
 
 success:
-    if (end) *end = (char *)a;
+    if (endPtr) *endPtr = (char *)(a);
     if (!std::isfinite(val)) return 0.0f;
 
     return minus * val;
 
 error:
-    if (end) *end = (char *)str;
+    if (endPtr) *endPtr = (char *)(nPtr);
     return 0.0f;
 }
 
-// max: maximum number of characters to copy, size: length of the copied string
-char* duplicate(const char* str, size_t max, uint32_t* size)
+char* strDuplicate(const char *str, size_t n)
 {
-    if (!str) {
-        if (size) *size = 0;
-        return nullptr;
-    }
-
     auto len = strlen(str);
-    if (len < max) max = len;
+    if (len < n) n = len;
 
-    auto ret = tvg::malloc<char>(max + 1);
-    ret[max] = '\0';
+    auto ret = (char *) malloc(n + 1);
+    if (!ret) return nullptr;
+    ret[n] = '\0';
 
-    if (size) *size = max;
-
-    return (char*)memcpy(ret, str, max);
+    return (char *) memcpy(ret, str, n);
 }
 
-char* append(char* lhs, const char* rhs, size_t n)
+char* strAppend(char* lhs, const char* rhs, size_t n)
 {
     if (!rhs) return lhs;
-    if (!lhs) return duplicate(rhs, n);
-    lhs = tvg::realloc<char>(lhs, strlen(lhs) + n + 1);
+    if (!lhs) return strDuplicate(rhs, n);
+    lhs = (char*)realloc(lhs, strlen(lhs) + n + 1);
     return strncat(lhs, rhs, n);
 }
 
-
-char* dirname(const char* path)
+char* strDirname(const char* path)
 {
     auto ptr = strrchr(path, '/');
 #ifdef _WIN32
@@ -242,44 +236,7 @@ char* dirname(const char* path)
     if (ptr2) ptr = ptr2;
 #endif
     auto len = ptr ? size_t(ptr - path + 1) : SIZE_MAX;
-    return duplicate(path, len);
-}
-
-
-char* filename(const char* path)
-{
-    const char* ptr = strrchr(path, '/');
-#ifdef _WIN32
-    auto ptr2 = strrchr(ptr ? ptr : path, '\\');
-    if (ptr2) ptr = ptr2;
-#endif
-    if (ptr) ++ptr;
-    else ptr = path;
-    auto dot = fileext(ptr);
-    auto len = (dot > ptr) ? (size_t)(dot - ptr - 1) : strlen(ptr);
-    return duplicate(ptr, len);
-}
-
-
-const char* fileext(const char* path)
-{
-    auto ext = path;
-    while (ext) {
-        auto p = strchr(ext, '.');
-        if (!p) break;
-        ext = p + 1;
-    }
-    return ext;
-}
-
-
-char* concat(const char* a, const char* b)
-{
-    auto len = strlen(a) + strlen(b) + 1;
-    auto ret = tvg::malloc<char>(len * sizeof(char));
-    strcpy(ret, a);
-    strcat(ret, b);
-    return ret;
+    return strDuplicate(path, len);
 }
 
 }

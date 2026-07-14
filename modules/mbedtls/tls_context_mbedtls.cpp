@@ -79,7 +79,6 @@ void CookieContextMbedTLS::clear() {
 	mbedtls_ctr_drbg_free(&ctr_drbg);
 	mbedtls_entropy_free(&entropy);
 	mbedtls_ssl_cookie_free(&cookie_ctx);
-	inited = false;
 }
 
 CookieContextMbedTLS::CookieContextMbedTLS() {
@@ -194,17 +193,17 @@ Error TLSContextMbedTLS::init_client(int p_transport, const String &p_hostname, 
 		mbedtls_ssl_set_hostname(&tls, cn.utf8().get_data());
 	}
 
-	Ref<X509CertificateMbedTLS> cas;
+	X509CertificateMbedTLS *cas = nullptr;
 
 	if (p_options->get_trusted_ca_chain().is_valid()) {
 		// Locking CA certificates
 		certs = p_options->get_trusted_ca_chain();
 		certs->lock();
-		cas = certs;
+		cas = certs.ptr();
 	} else {
 		// Fall back to default certificates (no need to lock those).
 		cas = CryptoMbedTLS::get_default_certificates();
-		if (cas.is_null()) {
+		if (cas == nullptr) {
 			clear();
 			ERR_FAIL_V_MSG(ERR_UNCONFIGURED, "SSL module failed to initialize!");
 		}

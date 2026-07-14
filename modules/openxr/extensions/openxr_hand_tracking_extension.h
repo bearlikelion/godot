@@ -31,9 +31,8 @@
 #pragma once
 
 #include "../util.h"
-#include "openxr_extension_wrapper.h"
-
 #include "core/math/quaternion.h"
+#include "openxr_extension_wrapper.h"
 #include "servers/xr/xr_hand_tracker.h"
 
 class OpenXRHandTrackingExtension : public OpenXRExtensionWrapper {

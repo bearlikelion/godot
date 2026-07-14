@@ -685,7 +685,10 @@ public:
 		return (void *)_data;
 	}
 
-	explicit List(const List &p_list) {
+	/**
+	 * copy constructor for the list
+	 */
+	List(const List &p_list) {
 		const Element *it = p_list.front();
 		while (it) {
 			push_back(it->get());

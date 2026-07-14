@@ -36,7 +36,6 @@ import android.os.Bundle
 import android.preference.PreferenceManager
 import android.view.LayoutInflater
 import android.view.MenuItem
-import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
 import android.widget.Button
@@ -48,7 +47,6 @@ import androidx.fragment.app.Fragment
 import org.godotengine.editor.BaseGodotEditor
 import org.godotengine.editor.BaseGodotEditor.Companion.SNACKBAR_SHOW_DURATION_MS
 import org.godotengine.editor.R
-import org.godotengine.godot.feature.PictureInPictureProvider
 import org.godotengine.godot.utils.DialogUtils
 
 /**
@@ -67,7 +65,7 @@ class GameMenuFragment : Fragment(), PopupMenu.OnMenuItemClickListener {
 	/**
 	 * Used to be notified of events fired when interacting with the game menu.
 	 */
-	interface GameMenuListener : PictureInPictureProvider {
+	interface GameMenuListener {
 
 		/**
 		 * Kotlin representation of the RuntimeNodeSelect::SelectMode enum in 'scene/debugger/scene_debugger.h'.
@@ -111,16 +109,16 @@ class GameMenuFragment : Fragment(), PopupMenu.OnMenuItemClickListener {
 		fun isGameEmbeddingSupported(): Boolean
 		fun embedGameOnPlay(embedded: Boolean)
 
+		fun enterPiPMode() {}
 		fun minimizeGameWindow() {}
 		fun closeGameWindow() {}
-		fun dragGameWindow(view: View, event: MotionEvent): Boolean { return false}
 
 		fun isMinimizedButtonEnabled() = false
 		fun isFullScreenButtonEnabled() = false
 		fun isCloseButtonEnabled() = false
 		fun isPiPButtonEnabled() = false
 		fun isMenuBarCollapsable() = false
-		fun isDragButtonEnabled() = false
+
 		fun isAlwaysOnTopSupported() = false
 
 		fun onFullScreenUpdated(enabled: Boolean) {}
@@ -129,9 +127,6 @@ class GameMenuFragment : Fragment(), PopupMenu.OnMenuItemClickListener {
 
 	private val collapseMenuButton: View? by lazy {
 		view?.findViewById(R.id.game_menu_collapse_button)
-	}
-	private val dragButton: View? by lazy {
-		view?.findViewById(R.id.game_menu_drag_button)
 	}
 	private val suspendButton: View? by lazy {
 		view?.findViewById(R.id.game_menu_suspend_button)
@@ -186,6 +181,7 @@ class GameMenuFragment : Fragment(), PopupMenu.OnMenuItemClickListener {
 		PopupMenu(context, optionsButton).apply {
 			setOnMenuItemClickListener(this@GameMenuFragment)
 			inflate(R.menu.options_menu)
+
 			if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
 				menu.setGroupDividerEnabled(true)
 			}
@@ -267,7 +263,6 @@ class GameMenuFragment : Fragment(), PopupMenu.OnMenuItemClickListener {
 		val isCloseButtonEnabled = menuListener?.isCloseButtonEnabled() == true
 		val isPiPButtonEnabled = menuListener?.isPiPButtonEnabled() == true
 		val isMenuBarCollapsable = menuListener?.isMenuBarCollapsable() == true
-		val isDragButtonEnabled = menuListener?.isDragButtonEnabled() == true
 
 		// Show the divider if any of the window controls is visible
 		view.findViewById<View>(R.id.game_menu_window_controls_divider)?.isVisible =
@@ -275,21 +270,13 @@ class GameMenuFragment : Fragment(), PopupMenu.OnMenuItemClickListener {
 				isFullScreenButtonEnabled ||
 				isCloseButtonEnabled ||
 				isPiPButtonEnabled ||
-				isMenuBarCollapsable ||
-				isDragButtonEnabled
+				isMenuBarCollapsable
 
 		collapseMenuButton?.apply {
 			isVisible = isMenuBarCollapsable
 			setOnClickListener {
 				collapseGameMenu()
 			}
-		}
-		dragButton?.apply {
-			isVisible = isDragButtonEnabled
-			setOnTouchListener { v, event ->
-				menuListener?.dragGameWindow(v, event) == true
-			}
-
 		}
 		fullscreenButton?.apply{
 			isVisible = isFullScreenButtonEnabled
@@ -458,10 +445,6 @@ class GameMenuFragment : Fragment(), PopupMenu.OnMenuItemClickListener {
 
 	internal fun isAlwaysOnTop() = isGameEmbedded && alwaysOnTopChecked
 
-	internal fun toggleDragButton(pressed: Boolean) {
-		dragButton?.isPressed = pressed
-	}
-
 	private fun collapseGameMenu() {
 		view?.isVisible = false
 		PreferenceManager.getDefaultSharedPreferences(context).edit {
@@ -476,11 +459,6 @@ class GameMenuFragment : Fragment(), PopupMenu.OnMenuItemClickListener {
 			putBoolean(PREF_KEY_GAME_MENU_BAR_COLLAPSED, false)
 		}
 		menuListener?.onGameMenuCollapsed(false)
-	}
-
-	internal fun refreshButtonsVisibility() {
-		minimizeButton?.isVisible = menuListener?.isMinimizedButtonEnabled() == true
-		dragButton?.isVisible = menuListener?.isDragButtonEnabled() == true
 	}
 
 	private fun updateAlwaysOnTop(enabled: Boolean) {

@@ -31,8 +31,6 @@
 #include "text_line.h"
 #include "text_line.compat.inc"
 
-#include "core/object/class_db.h"
-
 void TextLine::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("clear"), &TextLine::clear);
 	ClassDB::bind_method(D_METHOD("duplicate"), &TextLine::duplicate);

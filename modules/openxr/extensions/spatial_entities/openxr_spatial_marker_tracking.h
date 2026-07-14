@@ -30,8 +30,6 @@
 
 #pragma once
 
-#include "../openxr_extension_wrapper.h"
-#include "../openxr_future_extension.h"
 #include "openxr_spatial_entities.h"
 
 // QrCode marker tracking capability configuration
@@ -98,9 +96,6 @@ public:
 		ARUCO_DICT_7X7_1000 = XR_SPATIAL_MARKER_ARUCO_DICT_7X7_1000_EXT,
 	};
 
-	OpenXRSpatialCapabilityConfigurationAruco();
-	virtual ~OpenXRSpatialCapabilityConfigurationAruco() override;
-
 	virtual bool has_valid_configuration() const override;
 	virtual XrSpatialCapabilityConfigurationBaseHeaderEXT *get_configuration() override;
 
@@ -135,9 +130,6 @@ public:
 		APRIL_TAG_DICT_36H10 = XR_SPATIAL_MARKER_APRIL_TAG_DICT_36H10_EXT,
 		APRIL_TAG_DICT_36H11 = XR_SPATIAL_MARKER_APRIL_TAG_DICT_36H11_EXT,
 	};
-
-	OpenXRSpatialCapabilityConfigurationAprilTag();
-	virtual ~OpenXRSpatialCapabilityConfigurationAprilTag() override;
 
 	virtual bool has_valid_configuration() const override;
 	virtual XrSpatialCapabilityConfigurationBaseHeaderEXT *get_configuration() override;
@@ -243,9 +235,6 @@ public:
 
 	virtual void on_process() override;
 
-	Ref<OpenXRFutureResult> start_entity_discovery(RID p_spatial_context, TypedArray<OpenXRSpatialComponentData> p_component_data, Ref<OpenXRStructureBase> p_next_snapshot_create = nullptr, Ref<OpenXRStructureBase> p_next_snapshot_query = nullptr, const Callable &p_user_callback = Callable());
-	void do_entity_update(RID p_spatial_context, TypedArray<OpenXRSpatialComponentData> p_component_data, Ref<OpenXRStructureBase> p_next_snapshot_create = nullptr, Ref<OpenXRStructureBase> p_next_snapshot_query = nullptr);
-
 	bool is_qrcode_supported();
 	bool is_micro_qrcode_supported();
 	bool is_aruco_supported();
@@ -259,8 +248,6 @@ private:
 	bool need_discovery = false;
 	int discovery_cooldown = 0;
 	Ref<OpenXRFutureResult> discovery_query_result;
-	TypedArray<OpenXRSpatialComponentData> marker_discovery_component_data;
-	TypedArray<OpenXRSpatialComponentData> marker_update_component_data;
 
 	Ref<OpenXRSpatialCapabilityConfigurationQrCode> qrcode_configuration;
 	Ref<OpenXRSpatialCapabilityConfigurationMicroQrCode> micro_qrcode_configuration;
@@ -273,8 +260,9 @@ private:
 
 	void _on_spatial_discovery_recommended(RID p_spatial_context);
 
-	void _process_snapshot(RID p_snapshot, RID p_spatial_context, bool p_is_discovery, TypedArray<OpenXRSpatialComponentData> p_component_data, Ref<OpenXRStructureBase> p_next_snapshot_query, const Callable &p_user_callback = Callable());
+	Ref<OpenXRFutureResult> _start_entity_discovery();
+	void _process_snapshot(RID p_snapshot, bool p_is_discovery);
 
-	// Trackers; maps each Spatial Context RID to their marker entities and trackers
-	HashMap<RID, HashMap<XrSpatialEntityIdEXT, Ref<OpenXRMarkerTracker>>> marker_trackers;
+	// Trackers
+	HashMap<XrSpatialEntityIdEXT, Ref<OpenXRMarkerTracker>> marker_trackers;
 };

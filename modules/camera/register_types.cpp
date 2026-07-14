@@ -37,7 +37,7 @@
 #include "camera_win.h"
 #endif
 #if defined(MACOS_ENABLED)
-#include "camera_apple.h"
+#include "camera_macos.h"
 #endif
 #if defined(ANDROID_ENABLED)
 #include "camera_android.h"
@@ -55,7 +55,7 @@ void initialize_camera_module(ModuleInitializationLevel p_level) {
 	CameraServer::make_default<CameraWindows>();
 #endif
 #if defined(MACOS_ENABLED)
-	CameraServer::make_default<CameraApple>();
+	CameraServer::make_default<CameraMacOS>();
 #endif
 #if defined(ANDROID_ENABLED)
 	CameraServer::make_default<CameraAndroid>();

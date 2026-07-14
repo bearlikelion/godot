@@ -32,7 +32,6 @@
 
 #include "core/config/project_settings.h"
 #include "core/io/config_file.h"
-#include "core/os/os.h"
 #include "editor/debugger/editor_debugger_node.h"
 #include "editor/editor_node.h"
 #include "editor/run/run_instances_dialog.h"
@@ -178,7 +177,7 @@ Error EditorRun::run(const String &p_scene, const String &p_write_movie, const V
 			print_line(String(" ").join(output));
 		}
 
-		ProcessID pid = 0;
+		OS::ProcessID pid = 0;
 		Error err = OS::get_singleton()->create_instance(instance_args, &pid);
 		ERR_FAIL_COND_V(err, err);
 		if (pid != 0) {
@@ -203,8 +202,8 @@ bool EditorRun::request_screenshot(const Callable &p_callback) {
 	}
 }
 
-bool EditorRun::has_child_process(ProcessID p_pid) const {
-	for (const ProcessID &E : pids) {
+bool EditorRun::has_child_process(OS::ProcessID p_pid) const {
+	for (const OS::ProcessID &E : pids) {
 		if (E == p_pid) {
 			return true;
 		}
@@ -212,7 +211,7 @@ bool EditorRun::has_child_process(ProcessID p_pid) const {
 	return false;
 }
 
-void EditorRun::stop_child_process(ProcessID p_pid) {
+void EditorRun::stop_child_process(OS::ProcessID p_pid) {
 	if (has_child_process(p_pid)) {
 		OS::get_singleton()->kill(p_pid);
 		pids.erase(p_pid);
@@ -221,7 +220,7 @@ void EditorRun::stop_child_process(ProcessID p_pid) {
 
 void EditorRun::stop() {
 	if (status != STATUS_STOP && pids.size() > 0) {
-		for (const ProcessID &E : pids) {
+		for (const OS::ProcessID &E : pids) {
 			OS::get_singleton()->kill(E);
 		}
 		pids.clear();
@@ -231,7 +230,7 @@ void EditorRun::stop() {
 	running_scene = "";
 }
 
-ProcessID EditorRun::get_current_process() const {
+OS::ProcessID EditorRun::get_current_process() const {
 	if (pids.front() == nullptr) {
 		return 0;
 	}
@@ -263,14 +262,12 @@ EditorRun::WindowPlacement EditorRun::get_window_placement() {
 
 	Ref<ConfigFile> cfg_override;
 	cfg_override.instantiate();
-#ifdef OVERRIDE_ENABLED
 	if (!bool(GLOBAL_GET("application/config/disable_project_settings_override")) && FileAccess::exists("res://override.cfg")) {
 		Error err = cfg_override->load("res://override.cfg");
 		if (err != OK) {
 			WARN_PRINT("Found override.cfg but could not load it.");
 		}
 	}
-#endif // OVERRIDE_ENABLED
 
 #define GET_CONFIG_WITH_OVERRIDE(m_section, m_key) \
 	cfg_override->get_value(m_section, m_key, GLOBAL_GET(vformat("%s/%s", m_section, m_key)))
@@ -289,7 +286,7 @@ EditorRun::WindowPlacement EditorRun::get_window_placement() {
 
 	int window_placement = EDITOR_GET("run/window_placement/rect");
 	if (screen_rect != Rect2()) {
-		if (DisplayServer::get_singleton()->has_feature(DisplayServerEnums::FEATURE_HIDPI)) {
+		if (DisplayServer::get_singleton()->has_feature(DisplayServer::FEATURE_HIDPI)) {
 			bool hidpi_proj = GET_CONFIG_WITH_OVERRIDE("display", "window/dpi/allow_hidpi");
 			int display_scale = 1;
 

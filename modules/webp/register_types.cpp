@@ -33,8 +33,6 @@
 #include "image_loader_webp.h"
 #include "resource_saver_webp.h"
 
-#include "core/io/resource_saver.h"
-
 static Ref<ImageLoaderWebP> image_loader_webp;
 static Ref<ResourceSaverWebP> resource_saver_webp;
 

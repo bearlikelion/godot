@@ -29,7 +29,6 @@
 /**************************************************************************/
 
 #include "movie_writer_mjpeg.h"
-
 #include "core/config/project_settings.h"
 #include "core/io/file_access.h"
 

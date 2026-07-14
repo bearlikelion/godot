@@ -34,6 +34,7 @@
 #include "core/templates/hash_map.h"
 #include "core/templates/list.h"
 #include "core/variant/array.h"
+#include "servers/display/display_server.h"
 
 #if __has_include(<AVFAudio/AVSpeechSynthesis.h>)
 #import <AVFAudio/AVSpeechSynthesis.h>
@@ -41,14 +42,12 @@
 #import <AVFoundation/AVFoundation.h>
 #endif
 
-struct TTSUtterance;
-
 @interface GDTTTS : NSObject <AVSpeechSynthesizerDelegate> {
 	bool speaking;
 	HashMap<id, int64_t> ids;
 
 	AVSpeechSynthesizer *av_synth;
-	List<TTSUtterance> queue;
+	List<DisplayServer::TTSUtterance> queue;
 }
 
 - (void)pauseSpeaking;

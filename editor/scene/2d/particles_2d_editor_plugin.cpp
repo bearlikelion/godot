@@ -31,8 +31,6 @@
 #include "particles_2d_editor_plugin.h"
 
 #include "core/io/image_loader.h"
-#include "core/object/callable_mp.h"
-#include "core/os/os.h"
 #include "editor/editor_node.h"
 #include "editor/editor_string_names.h"
 #include "editor/editor_undo_redo_manager.h"
@@ -41,6 +39,7 @@
 #include "scene/2d/gpu_particles_2d.h"
 #include "scene/gui/box_container.h"
 #include "scene/gui/check_box.h"
+#include "scene/gui/margin_container.h"
 #include "scene/gui/option_button.h"
 #include "scene/gui/popup_menu.h"
 #include "scene/gui/spin_box.h"

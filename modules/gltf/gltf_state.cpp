@@ -33,8 +33,6 @@
 
 #include "gltf_template_convert.h"
 
-#include "core/object/class_db.h"
-
 void GLTFState::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("add_used_extension", "extension_name", "required"), &GLTFState::add_used_extension);
 	ClassDB::bind_method(D_METHOD("append_data_to_buffers", "data", "deduplication"), &GLTFState::append_data_to_buffers);
@@ -446,7 +444,7 @@ void GLTFState::set_filename(const String &p_filename) {
 }
 
 Variant GLTFState::get_additional_data(const StringName &p_extension_name) const {
-	return additional_data.get(p_extension_name, Variant());
+	return additional_data[p_extension_name];
 }
 
 void GLTFState::set_additional_data(const StringName &p_extension_name, Variant p_additional_data) {

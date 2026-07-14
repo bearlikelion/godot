@@ -30,12 +30,9 @@
 
 #pragma once
 
-#include "core/io/image.h"
 #include "core/math/projection.h"
 #include "core/templates/local_vector.h"
-#include "servers/rendering/rendering_server_enums.h"
-
-#include <cfloat> // FLT_MIN, FLT_MAX
+#include "servers/rendering/rendering_server.h"
 
 class RendererSceneOcclusionCull {
 protected:
@@ -236,7 +233,7 @@ public:
 		return RID();
 	}
 
-	virtual void set_build_quality(RSE::ViewportOcclusionCullingBuildQuality p_quality) {}
+	virtual void set_build_quality(RS::ViewportOcclusionCullingBuildQuality p_quality) {}
 
 	RendererSceneOcclusionCull() {
 		singleton = this;

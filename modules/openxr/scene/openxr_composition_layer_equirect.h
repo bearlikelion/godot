@@ -30,9 +30,9 @@
 
 #pragma once
 
-#include "openxr_composition_layer.h"
-
 #include <openxr/openxr.h>
+
+#include "openxr_composition_layer.h"
 
 class OpenXRCompositionLayerEquirect : public OpenXRCompositionLayer {
 	GDCLASS(OpenXRCompositionLayerEquirect, OpenXRCompositionLayer);

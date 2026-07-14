@@ -196,7 +196,6 @@ void EditorColorMap::create() {
 
 	// Gizmo icons displayed in the 3D editor.
 	add_conversion_exception("Gizmo3DSamplePlayer");
-	add_conversion_exception("GizmoAreaLight");
 	add_conversion_exception("GizmoAudioListener3D");
 	add_conversion_exception("GizmoCamera3D");
 	add_conversion_exception("GizmoCPUParticles3D");
@@ -219,8 +218,6 @@ void EditorColorMap::create() {
 	add_conversion_exception("GuiGraphNodePort");
 	add_conversion_exception("GuiResizer");
 	add_conversion_exception("GuiMiniCheckerboard");
-	add_conversion_exception("PickerCursorBg");
-	add_conversion_exception("CenterView");
 
 	/// Code Editor.
 	add_conversion_exception("GuiTab");

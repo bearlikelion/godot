@@ -31,7 +31,6 @@
 #pragma once
 
 #include "scene/3d/visual_instance_3d.h"
-#include "scene/resources/material.h"
 #include "scene/resources/sprite_frames.h"
 
 class SpriteBase3D : public GeometryInstance3D {
@@ -109,7 +108,7 @@ protected:
 	_FORCE_INLINE_ RID &get_mesh() { return mesh; }
 	_FORCE_INLINE_ RID &get_material() { return material; }
 
-	uint32_t mesh_surface_offsets[RSE::ARRAY_MAX];
+	uint32_t mesh_surface_offsets[RS::ARRAY_MAX];
 	PackedByteArray vertex_buffer;
 	PackedByteArray attribute_buffer;
 	uint32_t vertex_stride = 0;

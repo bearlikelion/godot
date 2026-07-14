@@ -35,6 +35,7 @@
 // Other Android based devices are implementing this as well, see:
 // https://github.khronos.org/OpenXR-Inventory/extension_support.html#XR_FB_swapchain_update_state
 
+#include "../openxr_api.h"
 #include "../util.h"
 #include "openxr_composition_layer_extension.h"
 #include "openxr_extension_wrapper.h"

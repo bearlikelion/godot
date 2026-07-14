@@ -56,5 +56,6 @@ class SceneExporterGLTFPlugin : public EditorPlugin {
 
 public:
 	virtual String get_plugin_name() const override;
+	bool has_main_screen() const override;
 	SceneExporterGLTFPlugin();
 };

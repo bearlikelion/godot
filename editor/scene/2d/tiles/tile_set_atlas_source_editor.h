@@ -30,8 +30,9 @@
 
 #pragma once
 
-#include "editor/scene/2d/tiles/tile_atlas_view.h"
-#include "editor/scene/2d/tiles/tile_data_editors.h"
+#include "tile_atlas_view.h"
+#include "tile_data_editors.h"
+
 #include "scene/gui/split_container.h"
 #include "scene/resources/2d/tile_set.h"
 
@@ -59,8 +60,8 @@ public:
 	};
 
 	// -- Proxy object for an atlas source, needed by the inspector --
-	class TileSetAtlasSourceProxyObject : public RefCounted {
-		GDCLASS(TileSetAtlasSourceProxyObject, RefCounted);
+	class TileSetAtlasSourceProxyObject : public Object {
+		GDCLASS(TileSetAtlasSourceProxyObject, Object);
 
 	private:
 		Ref<TileSet> tile_set;
@@ -82,8 +83,8 @@ public:
 	};
 
 	// -- Proxy object for a tile, needed by the inspector --
-	class AtlasTileProxyObject : public RefCounted {
-		GDCLASS(AtlasTileProxyObject, RefCounted);
+	class AtlasTileProxyObject : public Object {
+		GDCLASS(AtlasTileProxyObject, Object);
 
 	private:
 		TileSetAtlasSourceEditor *tiles_set_atlas_source_editor = nullptr;
@@ -100,7 +101,7 @@ public:
 
 	public:
 		Ref<TileSetAtlasSource> get_edited_tile_set_atlas_source() const { return tile_set_atlas_source; }
-		RBSet<TileSelection> get_edited_tiles() const { return RBSet<TileSelection>(tiles); }
+		RBSet<TileSelection> get_edited_tiles() const { return tiles; }
 
 		// Update the proxied object.
 		void edit(Ref<TileSetAtlasSource> p_tile_set_atlas_source, const RBSet<TileSelection> &p_tiles = RBSet<TileSelection>());
@@ -146,13 +147,13 @@ private:
 	void _tile_data_editors_tree_selected();
 
 	// -- Inspector --
-	Ref<AtlasTileProxyObject> tile_proxy_object;
+	AtlasTileProxyObject *tile_proxy_object = nullptr;
 	EditorInspector *tile_inspector = nullptr;
 	Label *tile_inspector_no_tile_selected_label = nullptr;
 	String selected_property;
 	void _inspector_property_selected(const String &p_property);
 
-	Ref<TileSetAtlasSourceProxyObject> atlas_source_proxy_object;
+	TileSetAtlasSourceProxyObject *atlas_source_proxy_object = nullptr;
 	EditorInspector *atlas_source_inspector = nullptr;
 
 	// -- Atlas view --
@@ -283,7 +284,7 @@ private:
 
 	void _tile_set_changed();
 	void _tile_proxy_object_changed(const String &p_what);
-	void _atlas_source_proxy_object_changed(const String &p_what, const Ref<TileSetAtlasSourceProxyObject> &p_object);
+	void _atlas_source_proxy_object_changed(const String &p_what);
 
 	void _undo_redo_inspector_callback(Object *p_undo_redo, Object *p_edited, const String &p_property, const Variant &p_new_value);
 

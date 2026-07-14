@@ -38,7 +38,7 @@ class NetSocketWeb : public NetSocket {
 	GDSOFTCLASS(NetSocketWeb, NetSocket);
 
 protected:
-	static Ref<NetSocket> _create_func() {
+	static NetSocket *_create_func() {
 		return memnew(NetSocketWeb);
 	}
 

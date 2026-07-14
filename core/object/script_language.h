@@ -35,6 +35,7 @@
 #include "core/object/script_backtrace.h"
 #include "core/object/script_instance.h"
 #include "core/templates/pair.h"
+#include "core/templates/safe_refcount.h"
 #include "core/variant/typed_array.h"
 
 class ScriptLanguage;
@@ -70,6 +71,8 @@ class ScriptServer {
 	static bool inheriters_cache_dirty;
 
 public:
+	static ScriptEditRequestFunction edit_request_func;
+
 	static void set_scripting_enabled(bool p_enabled);
 	static bool is_scripting_enabled();
 	_FORCE_INLINE_ static int get_language_count() { return _language_count; }
@@ -151,6 +154,7 @@ public:
 	virtual StringName get_instance_base_type() const = 0; // this may not work in all scripts, will return empty if so
 	virtual ScriptInstance *instance_create(Object *p_this) = 0;
 	virtual PlaceHolderScriptInstance *placeholder_instance_create(Object *p_this) { return nullptr; }
+	virtual bool instance_has(const Object *p_this) const = 0;
 
 	virtual bool has_source_code() const = 0;
 	virtual String get_source_code() const = 0;
@@ -199,10 +203,6 @@ public:
 	Script() {
 		_define_ancestry(AncestralClass::SCRIPT);
 	}
-
-#ifndef DISABLE_DEPRECATED
-	[[deprecated("Use Object::get_script instead.")]] bool instance_has(const Object *p_this) const { return p_this != nullptr && Object::cast_to<Script>(p_this->get_script()) == this; }
-#endif // !DISABLE_DEPRECATED
 };
 
 class ScriptLanguage : public Object {
@@ -222,10 +222,7 @@ public:
 
 	/* EDITOR FUNCTIONS */
 	struct Warning {
-		/// One-based.
-		int start_line = 0;
-		/// One-based.
-		int end_line = 0;
+		int start_line = -1, end_line = -1;
 		int code;
 		String string_code;
 		String message;
@@ -233,9 +230,7 @@ public:
 
 	struct ScriptError {
 		String path;
-		/// One-based.
 		int line = -1;
-		/// One-based.
 		int column = -1;
 		String message;
 	};
@@ -278,6 +273,7 @@ public:
 	virtual bool is_using_templates() { return false; }
 	virtual bool validate(const String &p_script, const String &p_path = "", List<String> *r_functions = nullptr, List<ScriptError> *r_errors = nullptr, List<Warning> *r_warnings = nullptr, HashSet<int> *r_safe_lines = nullptr) const = 0;
 	virtual String validate_path(const String &p_path) const { return ""; }
+	virtual Script *create_script() const = 0;
 	virtual bool supports_builtin_mode() const = 0;
 	virtual bool supports_documentation() const { return false; }
 	virtual bool can_inherit_from_file() const { return false; }
@@ -301,7 +297,6 @@ public:
 		CODE_COMPLETION_KIND_NODE_PATH,
 		CODE_COMPLETION_KIND_FILE_PATH,
 		CODE_COMPLETION_KIND_PLAIN_TEXT,
-		CODE_COMPLETION_KIND_KEYWORD,
 		CODE_COMPLETION_KIND_MAX
 	};
 
@@ -313,27 +308,10 @@ public:
 		LOCATION_OTHER = 1 << 10,
 	};
 
-	struct TextEdit {
-		String new_text;
-		int start_line = -1;
-		int start_column;
-		int end_line;
-		int end_column;
-
-		_FORCE_INLINE_ bool is_set() const { return start_line != -1; }
-	};
-
 	struct CodeCompletionOption {
 		CodeCompletionKind kind = CODE_COMPLETION_KIND_PLAIN_TEXT;
 		String display;
 		String insert_text;
-		/**
-		 * Optional server side calculated insertion.
-		 *
-		 * In contrast to `insert_text`, the editor must not do matching of preexisting text on `text_edit`.
-		 * Note: This is used by the language server, there is no support in the builtin editor for this property at the moment.
-		 */
-		TextEdit text_edit;
 		Color font_color;
 		Ref<Resource> icon;
 		Variant default_value;
@@ -473,9 +451,7 @@ public:
 
 VARIANT_ENUM_CAST(ScriptLanguage::ScriptNameCasing);
 
-// Decrypts the embedded script encryption key into r_key (32 bytes). The plaintext key is
-// not kept resident anywhere else; callers must zero r_key as soon as they're done with it.
-void get_script_encryption_key(uint8_t r_key[32]);
+extern uint8_t script_encryption_key[32];
 
 class PlaceHolderScriptInstance : public ScriptInstance {
 	Object *owner = nullptr;

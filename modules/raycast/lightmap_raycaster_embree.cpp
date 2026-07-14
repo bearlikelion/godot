@@ -36,7 +36,7 @@
 #include <pmmintrin.h>
 #endif
 
-Ref<LightmapRaycaster> LightmapRaycasterEmbree::create_embree_raycaster() {
+LightmapRaycaster *LightmapRaycasterEmbree::create_embree_raycaster() {
 	return memnew(LightmapRaycasterEmbree);
 }
 

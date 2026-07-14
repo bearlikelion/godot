@@ -31,8 +31,7 @@
 #pragma once
 
 #include "scene/3d/chain_ik_3d.h"
-
-class Curve3D;
+#include "scene/3d/path_3d.h"
 
 class SplineIK3D : public ChainIK3D {
 	GDCLASS(SplineIK3D, ChainIK3D);

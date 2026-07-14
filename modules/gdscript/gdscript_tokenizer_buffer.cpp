@@ -447,8 +447,6 @@ GDScriptTokenizer::Token GDScriptTokenizerBuffer::scan() {
 		}
 		Token eof;
 		eof.type = Token::TK_EOF;
-		eof.start_line = current_line;
-		eof.end_line = current_line;
 		return eof;
 	};
 

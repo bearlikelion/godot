@@ -33,6 +33,7 @@
 #include "../action_map/openxr_action_set.h"
 #include "../action_map/openxr_binding_modifier.h"
 #include "../action_map/openxr_haptic_feedback.h"
+#include "../util.h"
 #include "openxr_extension_wrapper.h"
 
 class OpenXRDPadBindingExtension : public OpenXRExtensionWrapper {

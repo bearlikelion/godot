@@ -30,8 +30,6 @@
 
 #pragma once
 
-#include "core/object/message_queue.h"
-#include "core/object/ref_counted.h"
 #include "core/os/main_loop.h"
 #include "core/os/thread_safe.h"
 #include "core/templates/paged_allocator.h"
@@ -40,19 +38,22 @@
 
 #include <cstdlib>
 
-class ArrayMesh;
-class InputEvent;
-class Material;
-class MultiplayerAPI;
-class Node;
-class PackedScene;
-class Tween;
-class Viewport;
-class Window;
+#undef Window
 
+class ArrayMesh;
+class PackedScene;
+class InputEvent;
+class Node;
 #ifndef _3D_DISABLED
 class Node3D;
 #endif
+class Window;
+class Material;
+class Mesh;
+class MultiplayerAPI;
+class SceneDebugger;
+class Tween;
+class Viewport;
 
 class SceneTreeTimer : public RefCounted {
 	GDCLASS(SceneTreeTimer, RefCounted);
@@ -79,11 +80,6 @@ public:
 	bool is_ignoring_time_scale();
 
 	void release_connections();
-};
-
-struct SceneTreeGroup {
-	Vector<Node *> nodes;
-	bool changed = false;
 };
 
 class SceneTree : public MainLoop {
@@ -123,6 +119,11 @@ private:
 
 	bool node_threading_disabled = false;
 
+	struct Group {
+		Vector<Node *> nodes;
+		bool changed = false;
+	};
+
 #ifndef _3D_DISABLED
 	struct ClientPhysicsInterpolation {
 		SelfList<Node3D>::List _node_3d_list;
@@ -145,7 +146,7 @@ private:
 	bool paused = false;
 	bool suspended = false;
 
-	HashMap<StringName, SceneTreeGroup> group_map;
+	HashMap<StringName, Group> group_map;
 	bool _quit = false;
 
 	// Static so we can get directly instead of via SceneTree pointer.
@@ -196,7 +197,7 @@ private:
 	bool ugc_locked = false;
 	void _flush_ugc();
 
-	_FORCE_INLINE_ void _update_group_order(SceneTreeGroup &g);
+	_FORCE_INLINE_ void _update_group_order(Group &g);
 
 	TypedArray<Node> _get_nodes_in_group(const StringName &p_group);
 
@@ -234,7 +235,7 @@ private:
 	void process_timers(double p_delta, bool p_physics_frame);
 	void process_tweens(double p_delta, bool p_physics_frame);
 
-	SceneTreeGroup *add_to_group(const StringName &p_group, Node *p_node);
+	Group *add_to_group(const StringName &p_group, Node *p_node);
 	void remove_from_group(const StringName &p_group, Node *p_node);
 
 	void _process_group(ProcessGroup *p_group, bool p_physics);
@@ -289,7 +290,6 @@ protected:
 
 public:
 	enum {
-		// Keep in sync with CanvasItem and Node3D.
 		NOTIFICATION_TRANSFORM_CHANGED = 2000
 	};
 
@@ -300,7 +300,7 @@ public:
 		GROUP_CALL_UNIQUE = 4,
 	};
 
-	RequiredResult<Window> get_root() const;
+	_FORCE_INLINE_ Window *get_root() const { return root; }
 
 	void call_group_flagsp(uint32_t p_call_flags, const StringName &p_group, const StringName &p_function, const Variant **p_args, int p_argcount);
 	void notify_group_flags(uint32_t p_call_flags, const StringName &p_group, int p_notification);
@@ -339,7 +339,7 @@ public:
 	void _accessibility_force_update();
 	void _accessibility_notify_change(const Node *p_node, bool p_remove = false);
 	void _flush_accessibility_changes();
-	void _process_accessibility_changes(int p_window_id); // Effectively DisplayServerEnums::WindowID
+	void _process_accessibility_changes(int p_window_id); // Effectively DisplayServer::WindowID
 
 	virtual void initialize() override;
 
@@ -446,7 +446,7 @@ public:
 
 	//network API
 
-	RequiredResult<MultiplayerAPI> get_multiplayer(const NodePath &p_for_path = NodePath()) const;
+	Ref<MultiplayerAPI> get_multiplayer(const NodePath &p_for_path = NodePath()) const;
 	void set_multiplayer(Ref<MultiplayerAPI> p_multiplayer, const NodePath &p_root_path = NodePath());
 	void set_multiplayer_poll_enabled(bool p_enabled);
 	bool is_multiplayer_poll_enabled() const;

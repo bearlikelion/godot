@@ -60,12 +60,9 @@ enum class QuickOpenDisplayMode {
 };
 
 struct QuickOpenResultCandidate {
-	ResourceUID::ID uid;
+	String file_path;
 	Ref<Texture2D> thumbnail;
 	const FuzzySearchResult *result = nullptr;
-
-	static QuickOpenResultCandidate from_uid(const ResourceUID::ID &p_uid, bool &r_success);
-	static QuickOpenResultCandidate from_result(const FuzzySearchResult &p_result, bool &r_success);
 };
 
 class HighlightedLabel : public Label {
@@ -98,9 +95,7 @@ public:
 	void update_results();
 
 	bool has_nothing_selected() const;
-	ResourceUID::ID get_selected() const;
-	String get_selected_path() const;
-	const Vector<StringName> &get_base_types() const;
+	String get_selected() const;
 
 	bool is_instant_preview_enabled() const;
 	void set_instant_preview_toggle_visible(bool p_visible);
@@ -118,13 +113,12 @@ private:
 
 	Vector<FuzzySearchResult> search_results;
 	Vector<StringName> base_types;
-	LocalVector<ResourceUID::ID> uids;
-	AHashMap<ResourceUID::ID, StringName> filetypes;
+	Vector<String> filepaths;
+	AHashMap<String, StringName> filetypes;
 	Vector<QuickOpenResultCandidate> candidates;
-	HashSet<ResourceUID::ID> candidates_uids;
 
-	AHashMap<StringName, Vector<ResourceUID::ID>> selected_history;
-	HashSet<ResourceUID::ID> history_set;
+	AHashMap<StringName, Vector<QuickOpenResultCandidate>> selected_history;
+	HashSet<String> history_set;
 
 	String query;
 	int selection_index = -1;
@@ -157,12 +151,13 @@ private:
 	static QuickOpenDisplayMode get_adaptive_display_mode(const Vector<StringName> &p_base_types);
 
 	void _ensure_result_vector_capacity();
-	void _sort_uids(int p_max_results);
+	void _sort_filepaths(int p_max_results);
 	void _create_initial_results();
-	void _find_uids_in_folder(EditorFileSystemDirectory *p_directory, bool p_include_addons);
+	void _find_filepaths_in_folder(EditorFileSystemDirectory *p_directory, bool p_include_addons);
 
-	Vector<ResourceUID::ID> *_get_history();
-	void _add_candidate(QuickOpenResultCandidate &p_candidate);
+	Vector<QuickOpenResultCandidate> *_get_history();
+	void _setup_candidate(QuickOpenResultCandidate &p_candidate, const String &p_filepath);
+	void _setup_candidate(QuickOpenResultCandidate &p_candidate, const FuzzySearchResult &p_result);
 	void _update_fuzzy_search_results();
 	void _use_default_candidates();
 	void _score_and_sort_candidates();
@@ -261,14 +256,13 @@ class EditorQuickOpenDialog : public AcceptDialog {
 	GDCLASS(EditorQuickOpenDialog, AcceptDialog);
 
 public:
-	void popup_dialog(const Vector<StringName> &p_base_types, const Callable &p_item_selected_callback, bool p_allow_type_switching = false);
+	void popup_dialog(const Vector<StringName> &p_base_types, const Callable &p_item_selected_callback);
 	void popup_dialog_for_property(const Vector<StringName> &p_base_types, Object *p_obj, const StringName &p_path, const Callable &p_item_selected_callback);
 	EditorQuickOpenDialog();
 
 protected:
 	virtual void cancel_pressed() override;
 	virtual void ok_pressed() override;
-	virtual void shortcut_input(const Ref<InputEvent> &p_event) override;
 	void item_pressed(bool p_double_click);
 	void selection_changed();
 
@@ -284,8 +278,6 @@ private:
 	StringName property_path;
 	Variant initial_property_value;
 	bool initial_selection_performed = false;
-	bool allow_type_switching = false;
-	bool is_cycling_items = false;
 	bool _is_instant_preview_active() const;
 	void _search_box_text_changed(const String &p_query);
 	void _finish_dialog_setup(const Vector<StringName> &p_base_types);

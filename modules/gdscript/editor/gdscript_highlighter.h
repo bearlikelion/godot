@@ -30,7 +30,7 @@
 
 #pragma once
 
-#include "editor/script/syntax_highlighters.h"
+#include "editor/script/script_editor_plugin.h"
 
 class GDScriptSyntaxHighlighter : public EditorSyntaxHighlighter {
 	GDCLASS(GDScriptSyntaxHighlighter, EditorSyntaxHighlighter)

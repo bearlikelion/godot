@@ -30,13 +30,9 @@
 
 #include "register_types.h"
 
-#include "shader_compile.h"
-
 #include "core/config/engine.h"
-
-#ifdef D3D12_ENABLED
 #include "core/os/os.h"
-#endif
+#include "shader_compile.h"
 
 GODOT_GCC_WARNING_PUSH_AND_IGNORE("-Wshadow")
 
@@ -53,12 +49,7 @@ Vector<uint8_t> compile_glslang_shader(RenderingDeviceCommons::ShaderStage p_sta
 		EShLangFragment,
 		EShLangTessControl,
 		EShLangTessEvaluation,
-		EShLangCompute,
-		EShLangRayGen,
-		EShLangAnyHit,
-		EShLangClosestHit,
-		EShLangMiss,
-		EShLangIntersect,
+		EShLangCompute
 	};
 
 	int ClientInputSemanticsVersion = 100; // maps to, say, #define VULKAN 100

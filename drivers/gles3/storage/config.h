@@ -32,10 +32,11 @@
 
 #ifdef GLES3_ENABLED
 
+#include "core/config/project_settings.h"
+#include "core/string/ustring.h"
 #include "core/templates/hash_set.h"
 
-#include <platform_gl.h>
-#undef ConnectFlags // Defined by windows.h through egl.h, breaks object.h.
+#include "platform_gl.h"
 
 #ifdef ANDROID_ENABLED
 typedef void (*PFNGLFRAMEBUFFERTEXTUREMULTIVIEWOVRPROC)(GLenum, GLenum, GLuint, GLint, GLint, GLsizei);
@@ -44,8 +45,6 @@ typedef void (*PFNGLFRAMEBUFFERTEXTURE2DMULTISAMPLEEXTPROC)(GLenum, GLenum, GLen
 typedef void (*PFNGLFRAMEBUFFERTEXTUREMULTISAMPLEMULTIVIEWOVRPROC)(GLenum, GLenum, GLuint, GLint, GLsizei, GLint, GLsizei);
 typedef void (*PFNEGLIMAGETARGETTEXTURE2DOESPROC)(GLenum, void *);
 #endif
-
-class String;
 
 namespace GLES3 {
 

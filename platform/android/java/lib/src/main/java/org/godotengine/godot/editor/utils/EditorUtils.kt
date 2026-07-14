@@ -38,7 +38,4 @@ package org.godotengine.godot.editor.utils
 object EditorUtils {
 	@JvmStatic
 	external fun runScene(scene: String, sceneArgs: Array<String>)
-
-	@JvmStatic
-	external fun toggleTitleBar(visible: Boolean)
 }

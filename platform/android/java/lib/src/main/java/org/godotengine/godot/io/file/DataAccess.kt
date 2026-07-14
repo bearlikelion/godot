@@ -203,10 +203,8 @@ internal abstract class DataAccess {
 	abstract fun write(buffer: ByteBuffer): Boolean
 
 	fun seekFromEnd(positionFromEnd: Long) {
-		val positionFromBeginning = size() + positionFromEnd
-		if (positionFromBeginning >= 0) {
-			seek(positionFromBeginning)
-		}
+		val positionFromBeginning = max(0, size() - positionFromEnd)
+		seek(positionFromBeginning)
 	}
 
 	abstract class FileChannelDataAccess(private val filePath: String) : DataAccess() {

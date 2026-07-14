@@ -32,7 +32,6 @@
 
 #include "servers/rendering/renderer_rd/storage_rd/render_scene_buffers_rd.h"
 #include "servers/rendering/renderer_rd/storage_rd/render_scene_data_rd.h"
-#include "servers/rendering/rendering_server_types.h"
 #include "servers/rendering/storage/render_data.h"
 
 class RenderDataRD : public RenderData {
@@ -75,9 +74,7 @@ public:
 
 	bool lightmap_bicubic_filter = false;
 
-	float window_output_max_value = 1.0;
-
-	RenderingServerTypes::RenderInfo *render_info = nullptr;
+	RenderingMethod::RenderInfo *render_info = nullptr;
 
 	/* Viewport data */
 	bool transparent_bg = false;

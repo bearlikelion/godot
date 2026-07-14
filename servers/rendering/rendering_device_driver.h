@@ -46,7 +46,7 @@
 // ***********************************************************************************
 
 #include "core/object/object.h"
-#include "core/templates/paged_allocator.h"
+#include "core/variant/type_info.h"
 #include "servers/rendering/rendering_context_driver.h"
 #include "servers/rendering/rendering_device_commons.h"
 
@@ -98,28 +98,28 @@ public:
 				id(p_id) {}
 	};
 
-#define DEFINE_ID(m_name) \
-	struct m_name##ID : public ID { \
-		_ALWAYS_INLINE_ explicit operator bool() const { \
-			return id != 0; \
-		} \
-		_ALWAYS_INLINE_ m_name##ID &operator=(m_name##ID p_other) { \
-			id = p_other.id; \
-			return *this; \
-		} \
-		_ALWAYS_INLINE_ bool operator<(const m_name##ID &p_other) const { \
-			return id < p_other.id; \
-		} \
-		_ALWAYS_INLINE_ bool operator==(const m_name##ID &p_other) const { \
-			return id == p_other.id; \
-		} \
-		_ALWAYS_INLINE_ bool operator!=(const m_name##ID &p_other) const { \
-			return id != p_other.id; \
-		} \
+#define DEFINE_ID(m_name)                                                         \
+	struct m_name##ID : public ID {                                               \
+		_ALWAYS_INLINE_ explicit operator bool() const {                          \
+			return id != 0;                                                       \
+		}                                                                         \
+		_ALWAYS_INLINE_ m_name##ID &operator=(m_name##ID p_other) {               \
+			id = p_other.id;                                                      \
+			return *this;                                                         \
+		}                                                                         \
+		_ALWAYS_INLINE_ bool operator<(const m_name##ID &p_other) const {         \
+			return id < p_other.id;                                               \
+		}                                                                         \
+		_ALWAYS_INLINE_ bool operator==(const m_name##ID &p_other) const {        \
+			return id == p_other.id;                                              \
+		}                                                                         \
+		_ALWAYS_INLINE_ bool operator!=(const m_name##ID &p_other) const {        \
+			return id != p_other.id;                                              \
+		}                                                                         \
 		_ALWAYS_INLINE_ m_name##ID(const m_name##ID &p_other) : ID(p_other.id) {} \
-		_ALWAYS_INLINE_ explicit m_name##ID(uint64_t p_int) : ID(p_int) {} \
+		_ALWAYS_INLINE_ explicit m_name##ID(uint64_t p_int) : ID(p_int) {}        \
 		_ALWAYS_INLINE_ explicit m_name##ID(void *p_ptr) : ID((uint64_t)p_ptr) {} \
-		_ALWAYS_INLINE_ m_name##ID() = default; \
+		_ALWAYS_INLINE_ m_name##ID() = default;                                   \
 	};
 
 	// Id types declared before anything else to prevent cyclic dependencies between the different concerns.
@@ -140,8 +140,6 @@ public:
 	DEFINE_ID(QueryPool);
 	DEFINE_ID(Fence);
 	DEFINE_ID(Semaphore);
-	DEFINE_ID(AccelerationStructure);
-	DEFINE_ID(RaytracingPipeline);
 
 public:
 	/*****************/
@@ -172,10 +170,7 @@ public:
 		BUFFER_USAGE_INDEX_BIT = (1 << 6),
 		BUFFER_USAGE_VERTEX_BIT = (1 << 7),
 		BUFFER_USAGE_INDIRECT_BIT = (1 << 8),
-		BUFFER_USAGE_SHADER_BINDING_TABLE_BIT = (1 << 10),
 		BUFFER_USAGE_DEVICE_ADDRESS_BIT = (1 << 17),
-		BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT = (1 << 19),
-		BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT = (1 << 20),
 		// There are no Vulkan-equivalent. Try to use unused/unclaimed bits.
 		BUFFER_USAGE_DYNAMIC_PERSISTENT_BIT = (1 << 31),
 	};
@@ -192,16 +187,6 @@ public:
 	 * @return the buffer.
 	 */
 	virtual BufferID buffer_create(uint64_t p_size, BitField<BufferUsageBits> p_usage, MemoryAllocationType p_allocation_type, uint64_t p_frames_drawn) = 0;
-
-	// Creates a GPU buffer and uploads initial data in one operation.
-	// Used when API_TRAIT_BUFFER_CREATE_MAPPED_AT_CREATION is non-zero.
-	// On WebGPU this uses mappedAtCreation to avoid staging buffer overhead.
-	// Default impl returns invalid BufferID (caller falls back to
-	// buffer_create + staging). p_data must not be empty.
-	virtual BufferID buffer_create_with_data(uint64_t p_size, BitField<BufferUsageBits> p_usage, MemoryAllocationType p_allocation_type, const uint8_t *p_data, uint64_t p_data_size) {
-		return BufferID();
-	}
-
 	// Only for a buffer with BUFFER_USAGE_TEXEL_BIT.
 	virtual bool buffer_set_texel_format(BufferID p_buffer, DataFormat p_format) = 0;
 	virtual void buffer_free(BufferID p_buffer) = 0;
@@ -211,42 +196,8 @@ public:
 	virtual uint8_t *buffer_persistent_map_advance(BufferID p_buffer, uint64_t p_frames_drawn) = 0;
 	virtual uint64_t buffer_get_dynamic_offsets(Span<BufferID> p_buffers) = 0;
 	virtual void buffer_flush(BufferID p_buffer) {}
-	virtual void buffer_initiate_async_map(BufferID p_buffer) {} // WebGPU: start async map so it completes by next frame.
-	// Direct queue write to a buffer, bypassing staging buffers entirely.
-	// Used for skeleton/bone updates that are fully written before any draws.
-	virtual void buffer_write_direct(BufferID p_buffer, uint64_t p_offset, uint64_t p_size, const void *p_data) {}
-
-	// Returns the actual pixel size of texture data on the GPU, when it differs
-	// from the engine's format pixel size (e.g. WebGPU promotes R8→R32Float for
-	// storage textures). Returns 0 if no conversion is needed (default).
-	virtual uint32_t texture_get_gpu_pixel_size(TextureID p_texture) { return 0; }
-
-	// Converts readback data from GPU format to engine format. Only called when
-	// texture_get_gpu_pixel_size() returned non-zero. Converts `p_width` pixels
-	// per row for `p_height` rows, reading from p_src (gpu_pitch stride) and
-	// writing to p_dst (engine_pitch stride).
-	virtual void texture_readback_convert(TextureID p_texture,
-			const uint8_t *p_src, uint32_t p_src_pitch,
-			uint8_t *p_dst, uint32_t p_dst_pitch,
-			uint32_t p_width, uint32_t p_height) {}
-
-	// Converts upload data from engine format to GPU format. Only called when
-	// texture_get_gpu_pixel_size() returned non-zero. Converts `p_width` pixels
-	// per row for `p_height` rows, reading from p_src (engine_pitch stride) and
-	// writing to p_dst (gpu_pitch stride).
-	virtual void texture_upload_convert(TextureID p_texture,
-			const uint8_t *p_src, uint32_t p_src_pitch,
-			uint8_t *p_dst, uint32_t p_dst_pitch,
-			uint32_t p_width, uint32_t p_height) {}
-
 	// Only for a buffer with BUFFER_USAGE_DEVICE_ADDRESS_BIT.
 	virtual uint64_t buffer_get_device_address(BufferID p_buffer) = 0;
-
-	/// Optional override for buffer readback.  Backends with async readback
-	/// (WebGPU) implement this to manage their own persistent staging buffers.
-	/// Returns true if handled (data written to r_data), false to use the
-	/// default staging-buffer path in RenderingDevice::buffer_get_data().
-	virtual bool buffer_get_data_direct(BufferID p_buffer, uint64_t p_offset, uint64_t p_size, Vector<uint8_t> &r_data) { return false; }
 
 	/*****************/
 	/**** TEXTURE ****/
@@ -374,10 +325,8 @@ public:
 		PIPELINE_STAGE_ALL_GRAPHICS_BIT = (1 << 15),
 		PIPELINE_STAGE_ALL_COMMANDS_BIT = (1 << 16),
 		PIPELINE_STAGE_CLEAR_STORAGE_BIT = (1 << 17),
-		PIPELINE_STAGE_RAY_TRACING_SHADER_BIT = (1 << 21),
 		PIPELINE_STAGE_FRAGMENT_SHADING_RATE_ATTACHMENT_BIT = (1 << 22),
 		PIPELINE_STAGE_FRAGMENT_DENSITY_PROCESS_BIT = (1 << 23),
-		PIPELINE_STAGE_ACCELERATION_STRUCTURE_BUILD_BIT = (1 << 25),
 	};
 
 	enum BarrierAccessBits {
@@ -398,8 +347,6 @@ public:
 		BARRIER_ACCESS_HOST_WRITE_BIT = (1 << 14),
 		BARRIER_ACCESS_MEMORY_READ_BIT = (1 << 15),
 		BARRIER_ACCESS_MEMORY_WRITE_BIT = (1 << 16),
-		BARRIER_ACCESS_ACCELERATION_STRUCTURE_READ_BIT = (1 << 21),
-		BARRIER_ACCESS_ACCELERATION_STRUCTURE_WRITE_BIT = (1 << 22),
 		BARRIER_ACCESS_FRAGMENT_SHADING_RATE_ATTACHMENT_READ_BIT = (1 << 23),
 		BARRIER_ACCESS_FRAGMENT_DENSITY_MAP_ATTACHMENT_READ_BIT = (1 << 24),
 		BARRIER_ACCESS_RESOLVE_READ_BIT = (1 << 25),
@@ -430,22 +377,13 @@ public:
 		TextureSubresourceRange subresources;
 	};
 
-	struct AccelerationStructureBarrier {
-		AccelerationStructureID acceleration_structure;
-		BitField<BarrierAccessBits> src_access;
-		BitField<BarrierAccessBits> dst_access;
-		uint64_t offset = 0;
-		uint64_t size = 0;
-	};
-
 	virtual void command_pipeline_barrier(
 			CommandBufferID p_cmd_buffer,
 			BitField<PipelineStageBits> p_src_stages,
 			BitField<PipelineStageBits> p_dst_stages,
 			VectorView<MemoryAccessBarrier> p_memory_barriers,
 			VectorView<BufferBarrier> p_buffer_barriers,
-			VectorView<TextureBarrier> p_texture_barriers,
-			VectorView<AccelerationStructureBarrier> p_acceleration_structure_barriers) = 0;
+			VectorView<TextureBarrier> p_texture_barriers) = 0;
 
 	/****************/
 	/**** FENCES ****/
@@ -524,12 +462,6 @@ public:
 
 	// Retrieve the format used by the swap chain's framebuffers.
 	virtual DataFormat swap_chain_get_format(SwapChainID p_swap_chain) = 0;
-
-	// Retrieve the color space used by the swap chain's framebuffers.
-	virtual ColorSpace swap_chain_get_color_space(SwapChainID p_swap_chain) = 0;
-
-	// Retrieve whether the swapchain supports our preferred HDR formats.
-	virtual bool swap_chain_get_hdr_output_supported(SwapChainID p_swap_chain) = 0;
 
 	// Tells the swapchain the max_fps so it can use the proper frame pacing.
 	// Android uses this with Swappy library. Some implementations or platforms may ignore this hint.
@@ -629,41 +561,6 @@ public:
 	virtual void command_copy_buffer_to_texture(CommandBufferID p_cmd_buffer, BufferID p_src_buffer, TextureID p_dst_texture, TextureLayout p_dst_texture_layout, VectorView<BufferTextureCopyRegion> p_regions) = 0;
 	virtual void command_copy_texture_to_buffer(CommandBufferID p_cmd_buffer, TextureID p_src_texture, TextureLayout p_src_texture_layout, BufferID p_dst_buffer, VectorView<BufferTextureCopyRegion> p_regions) = 0;
 
-	// Multi-layer buffer→texture copy: covers `p_layer_count` consecutive
-	// array layers starting at `p_base_region.texture_subresource.layer`,
-	// with source data laid out contiguously in the staging buffer at
-	// `p_base_region.buffer_offset` with stride `p_per_layer_byte_stride`.
-	//
-	// Backends that support a single multi-layer copy (e.g. WebGPU's
-	// `extent.depthOrArrayLayers`, Vulkan's `imageSubresource.layerCount`)
-	// should override to issue one driver call. The default implementation
-	// fans out to per-layer `command_copy_buffer_to_texture`, mirroring the
-	// pre-existing per-layer behavior — safe for all current backends.
-	virtual void command_copy_buffer_to_texture_layered(CommandBufferID p_cmd_buffer, BufferID p_src_buffer, TextureID p_dst_texture, TextureLayout p_dst_texture_layout, const BufferTextureCopyRegion &p_base_region, uint32_t p_layer_count, uint64_t p_per_layer_byte_stride) {
-		for (uint32_t i = 0; i < p_layer_count; i++) {
-			BufferTextureCopyRegion r = p_base_region;
-			r.texture_subresource.layer += i;
-			r.buffer_offset += i * p_per_layer_byte_stride;
-			command_copy_buffer_to_texture(p_cmd_buffer, p_src_buffer, p_dst_texture, p_dst_texture_layout, r);
-		}
-	}
-
-	// Direct CPU->GPU layered texture initialization. Writes `p_layer_count`
-	// consecutive array layers into `p_dst_texture` from a contiguous CPU
-	// buffer at `p_cpu_data`. Used by RenderingDevice::_texture_initialize_layered
-	// when API_TRAIT_TEXTURE_INITIALIZE_DIRECT_WRITE is non-zero, as an
-	// alternative to the transfer-worker path (which requires a GPU staging
-	// buffer + command encoder).
-	//
-	// Layout of `p_cpu_data`: `p_layer_count` contiguous layer images, each
-	// of size `p_aligned_bpr * p_rows_per_image`. Total = `p_total_size`.
-	//
-	// Default impl errors; only called when the trait opts in, so non-WebGPU
-	// drivers are unaffected.
-	virtual void texture_initialize_direct_layered(TextureID p_dst_texture, TextureLayout p_dst_layout, const uint8_t *p_cpu_data, uint64_t p_total_size, uint32_t p_aligned_bpr, uint32_t p_rows_per_image, uint32_t p_width, uint32_t p_height, uint32_t p_layer_count, uint32_t p_base_layer, uint32_t p_mip_level) {
-		ERR_FAIL_MSG("texture_initialize_direct_layered called but driver did not override it. API_TRAIT_TEXTURE_INITIALIZE_DIRECT_WRITE should be 0 for this driver.");
-	}
-
 	/******************/
 	/**** PIPELINE ****/
 	/******************/
@@ -707,10 +604,6 @@ public:
 		AttachmentStoreOp stencil_store_op = ATTACHMENT_STORE_OP_DONT_CARE;
 		TextureLayout initial_layout = TEXTURE_LAYOUT_UNDEFINED;
 		TextureLayout final_layout = TEXTURE_LAYOUT_UNDEFINED;
-		// Original TextureUsageBits from AttachmentFormat — needed by drivers (e.g. WebGPU)
-		// that must promote the texture format when STORAGE_BIT is set, to keep pipelines in
-		// sync with the actual texture format produced by texture_create().
-		uint32_t usage_flags = 0;
 	};
 
 	struct AttachmentReference {
@@ -822,77 +715,6 @@ public:
 
 	virtual PipelineID compute_pipeline_create(ShaderID p_shader, VectorView<PipelineSpecializationConstant> p_specialization_constants) = 0;
 
-	/********************/
-	/**** RAYTRACING ****/
-	/********************/
-
-	// ----- ACCELERATION STRUCTURE -----
-
-	struct AccelerationStructureGeometry {
-		BitField<AccelerationStructureGeometryFlagBits> flags = {};
-		BufferID vertex_buffer;
-		uint32_t vertex_offset = 0;
-		uint32_t vertex_stride = 0;
-		uint32_t vertex_count = 0;
-		DataFormat vertex_format = DATA_FORMAT_MAX;
-		BufferID index_buffer;
-		uint32_t index_offset = 0;
-		uint32_t index_count = 0;
-		IndexBufferFormat index_format = {};
-	};
-
-	virtual AccelerationStructureID blas_create(VectorView<AccelerationStructureGeometry> p_geometries, BitField<AccelerationStructureFlagBits> p_flags) = 0;
-
-	struct AccelerationStructureInstance {
-		Transform3D transform;
-		uint32_t id = 0;
-		uint8_t mask = 0;
-		uint32_t hit_sbt_offset = 0;
-		BitField<AccelerationStructureInstanceFlagBits> flags = {};
-		AccelerationStructureID blas;
-	};
-
-	virtual AccelerationStructureID tlas_create(uint32_t p_max_instance_count, BitField<AccelerationStructureFlagBits> p_flags) = 0;
-	virtual void acceleration_structure_instance_write(uint8_t *r_driver_instance, const AccelerationStructureInstance &p_instance) = 0;
-
-	virtual void acceleration_structure_free(AccelerationStructureID p_acceleration_structure) = 0;
-	virtual uint32_t acceleration_structure_get_scratch_size_bytes(AccelerationStructureID p_acceleration_structure) = 0;
-
-	// ----- PIPELINE -----
-
-	struct PipelineShader {
-		ShaderID shader;
-		VectorView<PipelineSpecializationConstant> specialization_constants;
-		ShaderStage shader_stage = {};
-	};
-
-	struct HitGroup {
-		uint32_t closest_hit_shader_index = UINT32_MAX;
-		uint32_t any_hit_shader_index = UINT32_MAX;
-		uint32_t intersection_shader_index = UINT32_MAX;
-	};
-
-	virtual RaytracingPipelineID raytracing_pipeline_create(VectorView<PipelineShader> p_shaders, VectorView<uint32_t> p_raygen_shader_indices, VectorView<uint32_t> p_miss_shader_indices, VectorView<HitGroup> p_hit_groups, uint32_t p_max_trace_recursion_depth, ShaderID p_layout_defining_shader) = 0;
-	virtual void raytracing_pipeline_free(RaytracingPipelineID p_pipeline) = 0;
-
-	virtual bool raytracing_pipeline_get_shader_group_handles(RaytracingPipelineID p_pipeline, uint32_t p_group_index_offset, VectorView<uint32_t> p_group_indices, uint8_t *r_data, uint32_t p_data_stride_bytes) = 0;
-
-	// ----- COMMANDS -----
-
-	virtual void command_build_blas(CommandBufferID p_cmd_buffer, AccelerationStructureID p_acceleration_structure, BufferID p_scratch_buffer) = 0;
-	virtual void command_build_tlas(CommandBufferID p_cmd_buffer, AccelerationStructureID p_acceleration_structure, BufferID p_scratch_buffer, BufferID p_instance_buffer, uint32_t p_instance_offset, uint32_t p_instance_count) = 0;
-	virtual void command_bind_raytracing_pipeline(CommandBufferID p_cmd_buffer, RaytracingPipelineID p_pipeline) = 0;
-	virtual void command_bind_raytracing_uniform_set(CommandBufferID p_cmd_buffer, UniformSetID p_uniform_set, ShaderID p_shader, uint32_t p_set_index) = 0;
-
-	struct ShaderBindingTable {
-		BufferID buffer;
-		uint32_t offset = 0;
-		uint32_t stride = 0;
-		uint32_t size = 0;
-	};
-
-	virtual void command_trace_rays(CommandBufferID p_cmd_buffer, const ShaderBindingTable &p_raygen_sbt, const ShaderBindingTable &p_miss_sbt, const ShaderBindingTable &p_hit_sbt, uint32_t p_width, uint32_t p_height, uint32_t p_depth) = 0;
-
 	/******************/
 	/**** CALLBACK ****/
 	/******************/
@@ -945,8 +767,6 @@ public:
 		OBJECT_TYPE_SHADER,
 		OBJECT_TYPE_UNIFORM_SET,
 		OBJECT_TYPE_PIPELINE,
-		OBJECT_TYPE_ACCELERATION_STRUCTURE,
-		OBJECT_TYPE_RAYTRACING_PIPELINE,
 	};
 
 	struct MultiviewCapabilities {
@@ -987,70 +807,6 @@ public:
 		API_TRAIT_USE_GENERAL_IN_COPY_QUEUES,
 		API_TRAIT_BUFFERS_REQUIRE_TRANSITIONS,
 		API_TRAIT_TEXTURE_OUTPUTS_REQUIRE_CLEARS,
-		API_TRAIT_ACCELERATION_STRUCTURE_INSTANCE_SIZE,
-		API_TRAIT_SHADER_GROUP_HANDLE_SIZE,
-		API_TRAIT_SHADER_GROUP_BASE_ALIGNMENT,
-		API_TRAIT_SHADER_GROUP_HANDLE_ALIGNMENT,
-		// If non-zero, RenderingDevice::texture_get_data() routes through
-		// driver->texture_get_data() instead of the synchronous draw-graph +
-		// buffer_map path. WebGPU sets this because mapAsync requires a JS
-		// event-loop tick to complete; the driver's texture_get_data keeps a
-		// persistent staging buffer per (texture, layer) and returns cached
-		// data once the async map fires.
-		API_TRAIT_TEXTURE_GET_DATA_VIA_DRIVER,
-		// If non-zero, RenderingDevice::_texture_initialize_layered uses a
-		// CPU-only staging path that bypasses transfer workers entirely (no
-		// GPU staging buffer, no command encoder, no barriers). The driver
-		// writes directly from a CPU pointer via
-		// `texture_initialize_direct_layered`. Useful on backends (e.g.
-		// WebGPU) where a synchronous CPU->GPU `writeTexture` API exists and
-		// the transfer worker's GPU staging buffer would be wasted (peak
-		// memory drops by ~N bytes per upload, where N is the staging size).
-		API_TRAIT_TEXTURE_INITIALIZE_DIRECT_WRITE,
-		// If non-zero, RenderingDevice uses buffer_create_with_data() instead
-		// of buffer_create() + _buffer_initialize() when initial data is
-		// provided. Useful on backends (e.g. WebGPU) where the staging buffer
-		// path incurs expensive WASM→JS→GPU bridge crossings that can be
-		// avoided by creating the buffer with mappedAtCreation.
-		API_TRAIT_BUFFER_CREATE_MAPPED_AT_CREATION,
-		// If non-zero, caps the staging buffer pool max_size to this value
-		// (in MB), overriding the project setting. On backends where staging
-		// blocks use CPU shadow memory (e.g. WebGPU), keeping the pool small
-		// avoids wasting memory after the loading spike subsides. The pool
-		// handles overflow correctly via stall-and-reuse.
-		API_TRAIT_STAGING_BUFFER_MAX_SIZE_MB,
-		// If non-zero, skeleton bone buffer updates use direct queue writes
-		// (e.g. wgpuQueueWriteBuffer) instead of going through staging buffers
-		// and command encoder copies. This halves bridge crossings on backends
-		// like WebGPU where each API call crosses a WASM→JS boundary. Safe
-		// because skeleton data is fully updated before any draw commands.
-		API_TRAIT_SKELETON_BUFFER_DIRECT_WRITE,
-		// If non-zero, omni light shadows are forced to dual-paraboloid mode
-		// regardless of the configured shadow mode. This avoids expensive
-		// cubemap rendering (6 render pass encoder cycles + 2 copy operations
-		// per light) on backends where per-pass IPC overhead dominates, such
-		// as WebGPU. Dual-paraboloid renders 2 passes directly into the shadow
-		// atlas, which can then be merged into a single render pass.
-		API_TRAIT_FORCE_OMNI_DUAL_PARABOLOID,
-		// If non-zero, the renderer batches consecutive shadow draws of the
-		// same mesh/pipeline into single instanced draw calls. This drastically
-		// reduces per-draw IPC crossings on WebGPU where each SetBindGroup +
-		// DrawIndexed pair costs ~0.4us of bridge overhead.
-		API_TRAIT_BATCH_INSTANCE_DRAWS,
-		// If non-zero, the renderer passes the instance base index via the
-		// firstInstance parameter of drawIndexed instead of through push constants.
-		// This eliminates the per-draw SetBindGroup call for push constant rebinding.
-		// On WebGPU, each SetBindGroup IPC crossing costs ~0.3us; this saves one per draw.
-		API_TRAIT_FIRST_INSTANCE_INDEX,
-		// If non-zero, buffer_map() returns a CPU shadow copy and writes only
-		// reach the GPU when buffer_unmap() flushes them (e.g. WebGPU, where
-		// buffers can't be persistently mapped). RenderingDevice::_end_frame()
-		// then calls buffer_unmap() on all upload staging blocks before submit.
-		// Must be 0 on backends with real persistent mapping (Vulkan, Metal):
-		// their staging blocks are mapped once for their lifetime, and an
-		// extra per-frame unmap would unbalance the map refcount and leave
-		// dangling pointers.
-		API_TRAIT_BUFFER_MAP_IS_SHADOW_COPY,
 	};
 
 	enum ShaderChangeInvalidation {
@@ -1092,8 +848,6 @@ public:
 	virtual const RenderingShaderContainerFormat &get_shader_container_format() const = 0;
 
 	virtual bool is_composite_alpha_supported(CommandQueueID p_queue) const { return false; }
-
-	virtual DriverWorkarounds get_driver_workarounds() const { return DriverWorkarounds(); }
 
 	/******************/
 

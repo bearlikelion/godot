@@ -33,8 +33,6 @@
 #include "core/core_globals.h"
 #include "core/os/os.h"
 
-#include <cstdio>
-
 static PrintHandlerList *print_handler_list = nullptr;
 static thread_local bool is_printing = false;
 

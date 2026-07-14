@@ -34,8 +34,6 @@
 #include "core/os/main_loop.h"
 #include "core/os/os.h"
 
-#include <cstdio>
-
 struct LocalDebugger::ScriptsProfiler {
 	struct ProfileInfoSort {
 		bool operator()(const ScriptLanguage::ProfilingInfo &A, const ScriptLanguage::ProfilingInfo &B) const {

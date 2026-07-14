@@ -40,6 +40,16 @@
 #include <cstdio>
 #include <typeinfo> // IWYU pragma: keep // Used in macro.
 
+#ifdef SANITIZERS_ENABLED
+#ifdef __has_feature
+#if __has_feature(thread_sanitizer)
+#define TSAN_ENABLED
+#endif
+#elif defined(__SANITIZE_THREAD__)
+#define TSAN_ENABLED
+#endif
+#endif
+
 #ifdef TSAN_ENABLED
 #include <sanitizer/tsan_interface.h>
 #endif

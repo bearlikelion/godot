@@ -32,9 +32,6 @@
 
 #include "core/config/project_settings.h"
 #include "core/io/marshalls.h"
-#include "core/io/stream_peer_socket.h"
-#include "core/io/stream_peer_tcp.h"
-#include "core/io/stream_peer_uds.h"
 #include "core/os/os.h"
 
 bool RemoteDebuggerPeerTCP::is_peer_connected() {
@@ -223,7 +220,7 @@ void RemoteDebuggerPeerTCP::_poll() {
 	}
 }
 
-Ref<RemoteDebuggerPeer> RemoteDebuggerPeerTCP::create_tcp(const String &p_uri) {
+RemoteDebuggerPeer *RemoteDebuggerPeerTCP::create_tcp(const String &p_uri) {
 	ERR_FAIL_COND_V(!p_uri.begins_with("tcp://"), nullptr);
 
 	String debug_host = p_uri.replace("tcp://", "");
@@ -249,7 +246,7 @@ Ref<RemoteDebuggerPeer> RemoteDebuggerPeerTCP::create_tcp(const String &p_uri) {
 	return memnew(RemoteDebuggerPeerTCP(stream));
 }
 
-Ref<RemoteDebuggerPeer> RemoteDebuggerPeerTCP::create_unix(const String &p_uri) {
+RemoteDebuggerPeer *RemoteDebuggerPeerTCP::create_unix(const String &p_uri) {
 	ERR_FAIL_COND_V(!p_uri.begins_with("unix://"), nullptr);
 
 	String debug_path = p_uri.replace("unix://", "");

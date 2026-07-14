@@ -31,7 +31,6 @@
 #include "physics_server_3d.h"
 
 #include "core/config/project_settings.h"
-#include "core/object/class_db.h"
 #include "core/variant/typed_array.h"
 
 void PhysicsServer3DRenderingServerHandler::set_vertex(int p_vertex_id, const Vector3 &p_vertex) {

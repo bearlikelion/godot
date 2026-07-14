@@ -45,13 +45,8 @@ class DirAccessWindows : public DirAccess {
 	DirAccessWindowsPrivate *p = nullptr;
 	/* Windows stuff */
 
-	struct DriveInfo {
-		String path;
-		String label;
-	};
-
-	LocalVector<DriveInfo> drives;
-	void _update_drives();
+	char drives[MAX_DRIVES] = { 0 }; // a-z:
+	int drive_count = 0;
 
 	String current_dir;
 
@@ -70,7 +65,6 @@ public:
 
 	virtual int get_drive_count() override;
 	virtual String get_drive(int p_drive) override;
-	virtual String get_drive_label(int p_drive) override;
 
 	virtual Error change_dir(String p_dir) override; ///< can be relative or absolute, return false on success
 	virtual String get_current_dir(bool p_include_drive = true) const override; ///< return current dir location

@@ -30,10 +30,11 @@
 
 #pragma once
 
-#include "editor/scene/3d/node_3d_editor_gizmos.h"
+#include "editor/plugins/editor_plugin.h"
+#include "editor/scene/3d/node_3d_editor_plugin.h"
+#include "scene/3d/two_bone_ik_3d.h"
 
-class TwoBoneIK3D;
-class SurfaceTool;
+#include "scene/resources/surface_tool.h"
 
 class TwoBoneIK3DGizmoPlugin : public EditorNode3DGizmoPlugin {
 	GDCLASS(TwoBoneIK3DGizmoPlugin, EditorNode3DGizmoPlugin);

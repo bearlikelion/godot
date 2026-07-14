@@ -1,0 +1,17 @@
+78098b89c88a74ebe8c20117b8754620
+::res://::1783904885
+benchmark.gd::GDScript::7515730426005187050::1783890951::0::1::::<>Node3D<><>0<>0<><>::
+export_presets.cfg::TextFile::-1::1783904885::0::1::::<><><>0<>0<><>::
+main.tscn::PackedScene::-1::1783890951::0::1::::<><><>0<>0<><>::res://benchmark.gd
+::res://export_compat/::1783908968
+index.apple-touch-icon.png::CompressedTexture2D::4090322831723282283::1783908968::1783904888::1::::<><><>0<>0<>3bb3c9dd9b5a4771f9dbcf55bc81b2d5<>res://.godot/imported/index.apple-touch-icon.png-7526b3d737092b0381f3e783f252fb59.ctex::
+index.icon.png::CompressedTexture2D::1806428963793484853::1783908968::1783904888::1::::<><><>0<>0<>3f259a87e33cf181cdd9144ef4bd9a15<>res://.godot/imported/index.icon.png-867688ac0235c9a0a8ecb2ac6a661272.ctex::
+index.png::CompressedTexture2D::137745269692482958::1783908968::1783904888::1::::<><><>0<>0<>19d7567c77bbdba8a6eeb4eae35c9981<>res://.godot/imported/index.png-a3a9c6aec9ea752a95f8ffb19dce9207.ctex::
+::res://export_old/::1783905541
+index.apple-touch-icon.png::CompressedTexture2D::1977336455119685483::1783904889::1783905541::1::::<><><>0<>0<>a87c9d6b2eda9ef7f045e1dfd31268b5<>res://.godot/imported/index.apple-touch-icon.png-534d12e0c46bee891e87f9b2ce2b15dc.ctex::
+index.icon.png::CompressedTexture2D::8280950308828740116::1783904889::1783905541::1::::<><><>0<>0<>667bd85f09f45e5a455d9f3e693a8103<>res://.godot/imported/index.icon.png-f45a2f64a4c8a93256e3328420d78888.ctex::
+index.png::CompressedTexture2D::559519653846238995::1783904889::1783905541::1::::<><><>0<>0<>5d642833f9f206bb5787efd46b20afc3<>res://.godot/imported/index.png-9569f73924a83ab6a539625dc007aad6.ctex::
+::res://export_webgpu/::1783909535
+index.apple-touch-icon.png::CompressedTexture2D::3364856714812684147::1783909535::1783904672::1::::<><><>0<>0<>0706d75267f649aad78818701f3140ea<>res://.godot/imported/index.apple-touch-icon.png-1c0f5e28a78477094934607e112c88c7.ctex::
+index.icon.png::CompressedTexture2D::5859223337939938770::1783909535::1783904672::1::::<><><>0<>0<>262fe8c6bf12dcbd09a64fb68f54f593<>res://.godot/imported/index.icon.png-7cd3f7502d9ad313deea39da2a63d90e.ctex::
+index.png::CompressedTexture2D::2643474190079531116::1783909535::1783904672::1::::<><><>0<>0<>3498d693be77fccba5eade9f60c4fe77<>res://.godot/imported/index.png-c7020ef76df2a90c41e94e29ae6b206e.ctex::

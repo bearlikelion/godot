@@ -30,13 +30,9 @@
 
 #pragma once
 
-#ifndef __cplusplus
-#include <stddef.h>
-#include <stdint.h>
-#else
-#include <cstddef>
 #include <cstdint>
 
+#ifdef __cplusplus
 extern "C" {
 #endif
 

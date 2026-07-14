@@ -33,39 +33,10 @@
 #include "scene/gui/container.h"
 
 class TextureRect;
-class SplitContainer;
-
-class SplitContainerMultiDragger : public Control {
-	GDCLASS(SplitContainerMultiDragger, Control);
-
-	bool dragging = false;
-	int drag_from = 0;
-	int start_drag_split_offset = 0;
-
-protected:
-	void _notification(int p_what);
-	virtual void gui_input(const Ref<InputEvent> &p_event) override;
-
-public:
-	int dragger_index = -1;
-	SplitContainer *split_container = nullptr;
-
-	virtual CursorShape get_cursor_shape(const Point2 &p_pos = Point2i()) const override;
-
-	void update_position();
-	void stop_dragging();
-
-	SplitContainerMultiDragger();
-};
 
 class SplitContainerDragger : public Control {
 	GDCLASS(SplitContainerDragger, Control);
 	friend class SplitContainer;
-
-	bool dragging = false;
-	int drag_from = 0;
-	int start_drag_split_offset = 0;
-	bool mouse_inside = false;
 
 	Rect2 split_bar_rect;
 	TextureRect *touch_dragger = nullptr;
@@ -81,7 +52,11 @@ protected:
 	void _accessibility_action_dec(const Variant &p_data);
 	void _accessibility_action_set_value(const Variant &p_data);
 
-	virtual String _get_accessibility_name() const override;
+private:
+	bool dragging = false;
+	int drag_from = 0;
+	int start_drag_split_offset = 0;
+	bool mouse_inside = false;
 
 public:
 	int dragger_index = -1;
@@ -90,7 +65,7 @@ public:
 
 	void set_touch_dragger_enabled(bool p_enabled);
 	void update_touch_dragger();
-	void stop_dragging();
+	bool is_touch_dragger_enabled() const;
 
 	SplitContainerDragger();
 };
@@ -98,7 +73,6 @@ public:
 class SplitContainer : public Container {
 	GDCLASS(SplitContainer, Container);
 	friend class SplitContainerDragger;
-	friend class SplitContainerMultiDragger;
 
 public:
 	enum DraggerVisibility {
@@ -128,8 +102,6 @@ private:
 	bool initialized = false;
 
 	bool touch_dragger_enabled = false;
-	bool drag_nested_intersections = false;
-	int force_show_grabber_icon = -1;
 
 	struct ThemeCache {
 		Color touch_dragger_color;
@@ -163,13 +135,6 @@ private:
 	void _on_child_visibility_changed(Control *p_control);
 	void _add_valid_child(Control *p_control);
 	void _remove_valid_child(Control *p_control);
-
-	void _remove_nested_descendent(SplitContainer *p_nested_sc);
-	void _update_nested_descendent(SplitContainer *p_nested_sc, Control *p_direct_child);
-	void _update_nested_ancestors(bool p_remove = false);
-	void _update_all_nested_descendents(Control *p_control, Control *p_first_child = nullptr);
-
-	Size2 _get_minimum_size(bool p_use_desired_sizes) const;
 
 protected:
 	bool is_fixed = false;
@@ -209,7 +174,6 @@ public:
 	bool is_dragging_enabled() const;
 
 	virtual Size2 get_minimum_size() const override;
-	virtual Size2 get_desired_size() const override;
 
 	virtual Vector<int> get_allowed_size_flags_horizontal() const override;
 	virtual Vector<int> get_allowed_size_flags_vertical() const override;
@@ -230,11 +194,6 @@ public:
 
 	void set_touch_dragger_enabled(bool p_enabled);
 	bool is_touch_dragger_enabled() const;
-
-	void show_grabber_icon(int p_index);
-
-	void set_drag_nested_intersections(bool p_enabled);
-	bool is_dragging_nested_intersections() const;
 
 #ifndef DISABLE_DEPRECATED
 	Control *get_drag_area_control() { return dragging_area_controls[0]; }

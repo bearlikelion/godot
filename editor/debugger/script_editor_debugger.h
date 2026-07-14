@@ -31,7 +31,7 @@
 #pragma once
 
 #include "core/object/script_language.h"
-#include "core/os/process_id.h"
+#include "core/os/os.h"
 #include "editor/debugger/editor_debugger_inspector.h"
 #include "editor/debugger/editor_debugger_node.h"
 #include "scene/gui/margin_container.h"
@@ -81,12 +81,6 @@ private:
 		ACTION_DELETE_BREAKPOINT,
 		ACTION_DELETE_BREAKPOINTS_IN_FILE,
 		ACTION_DELETE_ALL_BREAKPOINTS,
-	};
-
-	enum VMemMenu {
-		VMEM_MENU_SHOW_IN_FILESYSTEM,
-		VMEM_MENU_SHOW_IN_EXPLORER,
-		VMEM_MENU_OWNERS,
 	};
 
 	AcceptDialog *msgdialog = nullptr;
@@ -145,7 +139,6 @@ private:
 	Button *vmem_export = nullptr;
 	LineEdit *vmem_total = nullptr;
 	TextureRect *vmem_notice_icon = nullptr;
-	PopupMenu *vmem_item_menu = nullptr;
 
 	Tree *stack_dump = nullptr;
 	LineEdit *search = nullptr;
@@ -164,7 +157,7 @@ private:
 	EditorPerformanceProfiler *performance_profiler = nullptr;
 	EditorExpressionEvaluator *expression_evaluator = nullptr;
 
-	ProcessID remote_pid = 0;
+	OS::ProcessID remote_pid = 0;
 	bool move_to_foreground = true;
 	bool can_request_idle_draw = false;
 
@@ -274,8 +267,6 @@ private:
 	void _collapse_errors_list();
 
 	void _vmem_item_activated();
-	void _vmem_tree_rmb_selected(const Vector2 &p_pos, MouseButton p_button);
-	void _vmem_item_menu_id_pressed(int p_option);
 
 	void _profiler_activate(bool p_enable, int p_profiler);
 	void _profiler_seeked();

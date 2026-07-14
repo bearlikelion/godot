@@ -37,10 +37,10 @@ class NetSocket : public RefCounted {
 	GDSOFTCLASS(NetSocket, RefCounted);
 
 protected:
-	static Ref<NetSocket> (*_create)();
+	static NetSocket *(*_create)();
 
 public:
-	static Ref<NetSocket> create();
+	static NetSocket *create();
 
 	enum PollType : int32_t {
 		POLL_TYPE_IN,

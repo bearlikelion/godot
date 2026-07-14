@@ -30,11 +30,7 @@
 
 #pragma once
 
-#include "core/io/image.h"
-#include "core/object/ref_counted.h"
-#include "core/os/keyboard.h"
-#include "core/variant/callable.h"
-#include "core/variant/variant.h"
+#include "servers/display/display_server.h"
 
 #import <AppKit/AppKit.h>
 #import <Foundation/Foundation.h>

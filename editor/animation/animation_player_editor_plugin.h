@@ -36,9 +36,10 @@
 #include "editor/plugins/editor_plugin.h"
 #include "scene/animation/animation_player.h"
 #include "scene/gui/dialogs.h"
+#include "scene/gui/slider.h"
 #include "scene/gui/spin_box.h"
+#include "scene/gui/texture_button.h"
 #include "scene/gui/tree.h"
-#include "scene/resources/material.h"
 
 class AnimationPlayerEditorPlugin;
 class ImageTexture;
@@ -305,6 +306,7 @@ public:
 	virtual void clear() override { anim_editor->clear(); }
 
 	virtual String get_plugin_name() const override { return "Anim"; }
+	bool has_main_screen() const override { return false; }
 	virtual void edit(Object *p_object) override;
 	virtual bool handles(Object *p_object) const override;
 	virtual void make_visible(bool p_visible) override;
@@ -331,9 +333,10 @@ public:
 class AnimationTrackKeyEditEditorPlugin : public EditorPlugin {
 	GDCLASS(AnimationTrackKeyEditEditorPlugin, EditorPlugin);
 
-	Ref<EditorInspectorPluginAnimationTrackKeyEdit> atk_plugin;
+	EditorInspectorPluginAnimationTrackKeyEdit *atk_plugin = nullptr;
 
 public:
+	bool has_main_screen() const override { return false; }
 	virtual bool handles(Object *p_object) const override;
 
 	virtual String get_plugin_name() const override { return "AnimationTrackKeyEdit"; }
@@ -356,9 +359,10 @@ public:
 class AnimationMarkerKeyEditEditorPlugin : public EditorPlugin {
 	GDCLASS(AnimationMarkerKeyEditEditorPlugin, EditorPlugin);
 
-	Ref<EditorInspectorPluginAnimationMarkerKeyEdit> amk_plugin;
+	EditorInspectorPluginAnimationMarkerKeyEdit *amk_plugin = nullptr;
 
 public:
+	bool has_main_screen() const override { return false; }
 	virtual bool handles(Object *p_object) const override;
 
 	virtual String get_plugin_name() const override { return "AnimationMarkerKeyEdit"; }

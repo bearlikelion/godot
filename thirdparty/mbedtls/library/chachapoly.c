@@ -17,8 +17,6 @@
 
 #include <string.h>
 
-#include "chacha20_internal.h"
-
 #include "mbedtls/platform.h"
 
 #if !defined(MBEDTLS_CHACHAPOLY_ALT)
@@ -166,13 +164,6 @@ int mbedtls_chachapoly_update(mbedtls_chachapoly_context *ctx,
         (ctx->state != CHACHAPOLY_STATE_CIPHERTEXT)) {
         return MBEDTLS_ERR_CHACHAPOLY_BAD_STATE;
     }
-
-#if !defined(MBEDTLS_CHACHA20_ALT)
-    ret = mbedtls_chacha20_check_counter_wrap(&ctx->chacha20_ctx, len);
-    if (ret != 0) {
-        return ret;
-    }
-#endif /* !MBEDTLS_CHACHA20_ALT */
 
     if (ctx->state == CHACHAPOLY_STATE_AAD) {
         ctx->state = CHACHAPOLY_STATE_CIPHERTEXT;

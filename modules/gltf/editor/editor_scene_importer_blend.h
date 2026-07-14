@@ -64,11 +64,6 @@ public:
 		BLEND_MODIFIERS_NONE,
 		BLEND_MODIFIERS_ALL
 	};
-	enum {
-		BLEND_VERTEX_COLOR_MATERIAL,
-		BLEND_VERTEX_COLOR_ACTIVE,
-		BLEND_VERTEX_COLOR_NONE
-	};
 
 	virtual void get_extensions(List<String> *r_extensions) const override;
 	virtual Node *import_scene(const String &p_path, uint32_t p_flags,
@@ -78,7 +73,6 @@ public:
 			List<ResourceImporter::ImportOption> *r_options) override;
 	virtual Variant get_option_visibility(const String &p_path, const String &p_scene_import_type, const String &p_option,
 			const HashMap<StringName, Variant> &p_options) override;
-	virtual void handle_compatibility_options(HashMap<StringName, Variant> &p_import_params) const override;
 };
 
 class LineEdit;

@@ -31,8 +31,6 @@
 #include "two_bone_ik_3d_gizmo_plugin.h"
 
 #include "editor/settings/editor_settings.h"
-#include "scene/3d/two_bone_ik_3d.h"
-#include "scene/resources/surface_tool.h"
 
 TwoBoneIK3DGizmoPlugin::SelectionMaterials TwoBoneIK3DGizmoPlugin::selection_materials;
 

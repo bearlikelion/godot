@@ -1,6 +1,0 @@
-# SCsub
-Import("env")
-Import("env_modules")
-
-env_gdcrashcatch = env_modules.Clone()
-env_gdcrashcatch.add_source_files(env.modules_sources, "*.cpp")

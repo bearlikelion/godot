@@ -30,8 +30,6 @@
 
 #include "copy_transform_modifier_3d.h"
 
-#include "core/object/class_db.h"
-
 bool CopyTransformModifier3D::_set(const StringName &p_path, const Variant &p_value) {
 	String path = p_path;
 
@@ -306,7 +304,7 @@ void CopyTransformModifier3D::set_relative(int p_index, bool p_enabled) {
 }
 
 bool CopyTransformModifier3D::is_relative(int p_index) const {
-	ERR_FAIL_INDEX_V(p_index, (int)settings.size(), false);
+	ERR_FAIL_INDEX_V(p_index, (int)settings.size(), 0);
 	CopyTransform3DSetting *setting = static_cast<CopyTransform3DSetting *>(settings[p_index]);
 	return setting->is_relative();
 }
@@ -318,7 +316,7 @@ void CopyTransformModifier3D::set_additive(int p_index, bool p_enabled) {
 }
 
 bool CopyTransformModifier3D::is_additive(int p_index) const {
-	ERR_FAIL_INDEX_V(p_index, (int)settings.size(), false);
+	ERR_FAIL_INDEX_V(p_index, (int)settings.size(), 0);
 	CopyTransform3DSetting *setting = static_cast<CopyTransform3DSetting *>(settings[p_index]);
 	return setting->additive;
 }

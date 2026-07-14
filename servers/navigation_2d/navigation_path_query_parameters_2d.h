@@ -31,7 +31,6 @@
 #pragma once
 
 #include "core/object/ref_counted.h"
-#include "core/variant/type_info.h"
 #include "servers/navigation_2d/navigation_constants_2d.h"
 
 class NavigationPathQueryParameters2D : public RefCounted {

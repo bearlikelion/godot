@@ -32,7 +32,6 @@
 
 #include "core/io/file_access.h"
 #include "core/io/file_access_memory.h"
-#include "core/object/class_db.h"
 #include "scene/resources/image_texture.h"
 #include "servers/rendering/rendering_server.h"
 

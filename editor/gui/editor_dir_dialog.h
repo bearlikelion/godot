@@ -46,7 +46,6 @@ class EditorDirDialog : public ConfirmationDialog {
 	Button *copy = nullptr;
 	HashSet<String> opened_paths;
 	String new_dir_path;
-	String base_directory_path;
 
 	Tree *tree = nullptr;
 	bool updating = false;

@@ -31,7 +31,6 @@
 #include "openxr_debug_utils_extension.h"
 
 #include "../openxr_api.h"
-
 #include "core/config/project_settings.h"
 #include "core/string/print_string.h"
 

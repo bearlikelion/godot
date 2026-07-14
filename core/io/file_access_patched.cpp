@@ -30,8 +30,9 @@
 
 #include "file_access_patched.h"
 
+#include "file_access_pack.h"
+
 #include "core/io/delta_encoding.h"
-#include "core/io/file_access_pack.h"
 #include "core/os/os.h"
 
 Error FileAccessPatched::_apply_patch() const {

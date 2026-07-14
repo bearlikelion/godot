@@ -30,7 +30,7 @@
 
 #pragma once
 
-#include "servers/rendering/rendering_device.h"
+#include "servers/rendering/rendering_server.h"
 
 class MultiUmaBufferBase {
 protected:

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2020 - 2026 ThorVG project. All rights reserved.
+ * Copyright (c) 2020 - 2024 the ThorVG project. All rights reserved.
 
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -22,39 +22,90 @@
 
 #include "tvgSwCommon.h"
 
-/************************************************************************/
-/* Internal Class Implementation                                        */
-/************************************************************************/
-
-static thread_local SwMpool* _pool = nullptr;
-static Array<SwMpool*> _pools;
-static uint32_t _threads = 0;
-static Key _key;
 
 /************************************************************************/
 /* External Class Implementation                                        */
 /************************************************************************/
 
-SwMpool* mpoolReq()
+SwOutline* mpoolReqOutline(SwMpool* mpool, unsigned idx)
 {
-    if (!_pool) {
-        _pool = new SwMpool(_threads);
-        ScopedLock lock(_key);
-        _pools.push(_pool);
-    }
-    return _pool;
+    return &mpool->outline[idx];
 }
 
-void mpoolInit(uint32_t threads)
+
+void mpoolRetOutline(SwMpool* mpool, unsigned idx)
 {
-    _threads = threads;
+    mpool->outline[idx].pts.clear();
+    mpool->outline[idx].cntrs.clear();
+    mpool->outline[idx].types.clear();
+    mpool->outline[idx].closed.clear();
 }
 
-void mpoolTerm()
+
+SwOutline* mpoolReqStrokeOutline(SwMpool* mpool, unsigned idx)
 {
-    for (auto p : _pools) {
-        delete p;
-        _pool = nullptr;
+    return &mpool->strokeOutline[idx];
+}
+
+
+void mpoolRetStrokeOutline(SwMpool* mpool, unsigned idx)
+{
+    mpool->strokeOutline[idx].pts.clear();
+    mpool->strokeOutline[idx].cntrs.clear();
+    mpool->strokeOutline[idx].types.clear();
+    mpool->strokeOutline[idx].closed.clear();
+}
+
+
+SwCellPool* mpoolReqCellPool(SwMpool* mpool, unsigned idx)
+{
+    return &mpool->cellPool[idx];
+}
+
+
+SwMpool* mpoolInit(uint32_t threads)
+{
+    auto allocSize = threads + 1;
+
+    auto mpool = static_cast<SwMpool*>(calloc(1, sizeof(SwMpool)));
+    mpool->outline = static_cast<SwOutline*>(calloc(1, sizeof(SwOutline) * allocSize));
+    mpool->strokeOutline = static_cast<SwOutline*>(calloc(1, sizeof(SwOutline) * allocSize));
+    mpool->cellPool = new SwCellPool[allocSize];
+
+    mpool->allocSize = allocSize;
+
+    return mpool;
+}
+
+
+bool mpoolClear(SwMpool* mpool)
+{
+    for (unsigned i = 0; i < mpool->allocSize; ++i) {
+        mpool->outline[i].pts.reset();
+        mpool->outline[i].cntrs.reset();
+        mpool->outline[i].types.reset();
+        mpool->outline[i].closed.reset();
+
+        mpool->strokeOutline[i].pts.reset();
+        mpool->strokeOutline[i].cntrs.reset();
+        mpool->strokeOutline[i].types.reset();
+        mpool->strokeOutline[i].closed.reset();
     }
-    _pools.reset();
+
+    return true;
+}
+
+
+bool mpoolTerm(SwMpool* mpool)
+{
+    if (!mpool) return false;
+
+    mpoolClear(mpool);
+
+    free(mpool->outline);
+    free(mpool->strokeOutline);
+    delete[](mpool->cellPool);
+    free(mpool);
+
+    return true;
 }

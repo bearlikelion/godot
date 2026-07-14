@@ -30,10 +30,8 @@
 
 #pragma once
 
-#include "../openxr_extension_wrapper.h"
-#include "../openxr_future_extension.h"
 #include "openxr_spatial_entities.h"
-
+#include "openxr_spatial_entity_extension.h"
 #include "scene/resources/3d/shape_3d.h"
 
 // Plane tracking capability configuration
@@ -228,8 +226,6 @@ public:
 
 	virtual void on_process() override;
 
-	Ref<OpenXRFutureResult> start_entity_discovery(RID p_spatial_context, TypedArray<OpenXRSpatialComponentData> p_component_data, Ref<OpenXRStructureBase> p_next_snapshot_create = nullptr, Ref<OpenXRStructureBase> p_next_snapshot_query = nullptr, const Callable &p_user_callback = Callable());
-
 	bool is_supported();
 
 private:
@@ -243,7 +239,6 @@ private:
 	Ref<OpenXRFutureResult> discovery_query_result;
 
 	Ref<OpenXRSpatialCapabilityConfigurationPlaneTracking> plane_configuration;
-	TypedArray<OpenXRSpatialComponentData> plane_component_data;
 
 	// Discovery logic
 	Ref<OpenXRFutureResult> _create_spatial_context();
@@ -251,8 +246,9 @@ private:
 
 	void _on_spatial_discovery_recommended(RID p_spatial_context);
 
-	void _process_snapshot(RID p_snapshot, RID p_spatial_context, TypedArray<OpenXRSpatialComponentData> p_component_data, Ref<OpenXRStructureBase> p_next_snapshot_query, const Callable &p_user_callback);
+	Ref<OpenXRFutureResult> _start_entity_discovery();
+	void _process_snapshot(RID p_snapshot);
 
-	// Trackers; maps each Spatial Context RID to their plane entities and trackers
-	HashMap<RID, HashMap<XrSpatialEntityIdEXT, Ref<OpenXRPlaneTracker>>> plane_trackers;
+	// Trackers
+	HashMap<XrSpatialEntityIdEXT, Ref<OpenXRPlaneTracker>> plane_trackers;
 };

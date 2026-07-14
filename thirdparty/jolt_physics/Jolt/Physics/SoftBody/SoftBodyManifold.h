@@ -36,15 +36,7 @@ public:
 	/// Get the body with which the vertex has collided in this update
 	JPH_INLINE BodyID				GetContactBodyID(const SoftBodyVertex &inVertex) const
 	{
-		if (!inVertex.mHasContact)
-			return BodyID();
-
-		// If this is a CCD contact, the BodyID is encoded in mCollidingShapeIndex
-		if (inVertex.mCollidingShapeIndex & int(BodyID::cBroadPhaseBit))
-			return BodyID(uint32(inVertex.mCollidingShapeIndex) ^ BodyID::cBroadPhaseBit);
-
-		// Otherwise we can get it from mCollidingShapes
-		return mCollidingShapes[inVertex.mCollidingShapeIndex].mBodyID;
+		return inVertex.mHasContact? mCollidingShapes[inVertex.mCollidingShapeIndex].mBodyID : BodyID();
 	}
 
 	/// Get the number of sensors that are in contact with the soft body

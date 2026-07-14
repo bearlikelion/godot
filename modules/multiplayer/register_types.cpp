@@ -37,8 +37,6 @@
 #include "scene_replication_interface.h"
 #include "scene_rpc_interface.h"
 
-#include "core/object/class_db.h"
-
 #ifdef TOOLS_ENABLED
 #include "editor/multiplayer_editor_plugin.h"
 #endif

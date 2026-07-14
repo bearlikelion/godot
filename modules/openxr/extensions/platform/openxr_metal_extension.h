@@ -30,13 +30,14 @@
 
 #pragma once
 
+#include "../../openxr_api.h"
 #include "../../util.h"
 #include "../openxr_extension_wrapper.h"
 
 #include "core/templates/vector.h"
 
 // Always include this as late as possible.
-#include "../../openxr_platform_inc.h" // IWYU pragma: keep.
+#include "../../openxr_platform_inc.h"
 
 class OpenXRMetalExtension : public OpenXRGraphicsExtensionWrapper {
 public:

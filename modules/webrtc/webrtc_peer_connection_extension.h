@@ -32,7 +32,8 @@
 
 #include "webrtc_peer_connection.h"
 
-#include "core/extension/ext_wrappers.gen.h"
+#include "core/extension/ext_wrappers.gen.inc"
+#include "core/object/gdvirtual.gen.inc"
 
 class WebRTCPeerConnectionExtension : public WebRTCPeerConnection {
 	GDCLASS(WebRTCPeerConnectionExtension, WebRTCPeerConnection);

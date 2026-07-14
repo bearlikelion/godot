@@ -30,7 +30,6 @@
 
 #include "editor_properties_vector.h"
 
-#include "core/object/callable_mp.h"
 #include "editor/editor_string_names.h"
 #include "editor/gui/editor_spin_slider.h"
 #include "editor/settings/editor_settings.h"
@@ -92,7 +91,10 @@ void EditorPropertyVectorN::update_property() {
 			spin_sliders[i]->set_value_no_signal(val.get(i));
 		}
 	}
-	_update_ratio();
+
+	if (!is_grabbed) {
+		_update_ratio();
+	}
 }
 
 void EditorPropertyVectorN::_update_ratio() {
@@ -115,6 +117,13 @@ void EditorPropertyVectorN::_store_link(bool p_linked) {
 	}
 	const String key = vformat("%s:%s", get_edited_object()->get_class(), get_edited_property());
 	EditorSettings::get_singleton()->set_project_metadata("linked_properties", key, p_linked);
+}
+
+void EditorPropertyVectorN::_grab_changed(bool p_grab) {
+	if (p_grab) {
+		_update_ratio();
+	}
+	is_grabbed = p_grab;
 }
 
 void EditorPropertyVectorN::_notification(int p_what) {
@@ -220,6 +229,8 @@ EditorPropertyVectorN::EditorPropertyVectorN(Variant::Type p_type, bool p_force_
 			spin[i]->set_h_size_flags(SIZE_EXPAND_FILL);
 		}
 		spin[i]->connect(SceneStringName(value_changed), callable_mp(this, &EditorPropertyVectorN::_value_changed).bind(String(COMPONENT_LABELS[i])));
+		spin[i]->connect(SNAME("grabbed"), callable_mp(this, &EditorPropertyVectorN::_grab_changed).bind(true));
+		spin[i]->connect(SNAME("ungrabbed"), callable_mp(this, &EditorPropertyVectorN::_grab_changed).bind(false));
 		add_focusable(spin[i]);
 	}
 
@@ -237,14 +248,6 @@ EditorPropertyVectorN::EditorPropertyVectorN(Variant::Type p_type, bool p_force_
 	add_child(hb);
 	if (!horizontal) {
 		set_label_reference(spin_sliders[0]); // Show text and buttons around this.
-	}
-}
-
-void EditorPropertyVectorN::set_deferred_drag_mode_enabled(bool p_enabled) {
-	EditorProperty::set_deferred_drag_mode_enabled(p_enabled);
-
-	for (int i = 0; i < component_count; i++) {
-		spin_sliders[i]->set_deferred_drag_mode_enabled(p_enabled);
 	}
 }
 

@@ -30,7 +30,6 @@
 
 #include "translation_domain.h"
 
-#include "core/object/class_db.h"
 #include "core/string/translation.h"
 #include "core/string/translation_server.h"
 #include "core/variant/typed_array.h"
@@ -287,7 +286,7 @@ void TranslationDomain::clear() {
 }
 
 const HashSet<Ref<Translation>> TranslationDomain::get_translations() const {
-	return HashSet<Ref<Translation>>(translations);
+	return translations;
 }
 
 HashSet<Ref<Translation>> TranslationDomain::find_translations(const String &p_locale, bool p_exact) const {

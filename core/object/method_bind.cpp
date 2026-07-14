@@ -28,9 +28,11 @@
 /* SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.                 */
 /**************************************************************************/
 
-#include "method_bind.h"
-
+// object.h needs to be the first include *before* method_bind.h
+// FIXME: Find out why and fix potential cyclical dependencies.
 #include "core/object/object.h"
+
+#include "method_bind.h"
 
 uint32_t MethodBind::get_hash() const {
 	MethodInfo mi;

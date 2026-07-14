@@ -50,9 +50,6 @@ def create_template_zip(env, js, wasm, side):
         in_files.append(side)  # Side wasm (contains the actual Godot code).
         out_files.append(zip_dir.File(binary_name + ".side.wasm"))
 
-    # WebGPU SPIR-V→WGSL conversion is now handled by Tint, compiled directly
-    # into the engine WASM binary. No separate translator module needed.
-
     service_worker = "#misc/dist/html/service-worker.js"
     if env.editor_build:
         # HTML
@@ -65,8 +62,6 @@ def create_template_zip(env, js, wasm, side):
             "godot.editor.audio.position.worklet.js",
             "logo.svg",
             "favicon.png",
-            "inter-regular.woff2",
-            "inter-bold.woff2",
         ]
         opt_cache = ["godot.editor.wasm"]
         subst_dict = {
@@ -84,7 +79,7 @@ def create_template_zip(env, js, wasm, side):
         # And logo/favicon
         in_files.append("#misc/dist/html/logo.svg")
         out_files.append(zip_dir.File("logo.svg"))
-        in_files.append("#misc/logo/icon.png")
+        in_files.append("#icon.png")
         out_files.append(zip_dir.File("favicon.png"))
         # PWA
         service_worker = env.Substfile(
@@ -98,10 +93,6 @@ def create_template_zip(env, js, wasm, side):
         out_files.append(zip_dir.File("manifest.json"))
         in_files.append("#misc/dist/html/offline.html")
         out_files.append(zip_dir.File("offline.html"))
-        in_files.append("#thirdparty/fonts/Inter_Regular.woff2")
-        out_files.append(zip_dir.File("inter-regular.woff2"))
-        in_files.append("#thirdparty/fonts/Inter_Bold.woff2")
-        out_files.append(zip_dir.File("inter-bold.woff2"))
     else:
         # HTML
         in_files.append("#misc/dist/html/full-size.html")

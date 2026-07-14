@@ -31,6 +31,8 @@
 #pragma once
 
 #include "core/math/audio_frame.h"
+#include "core/object/class_db.h"
+#include "core/os/os.h"
 #include "core/templates/safe_list.h"
 #include "core/variant/variant.h"
 #include "servers/audio/audio_effect.h"
@@ -68,8 +70,8 @@ protected:
 	int _get_configured_mix_rate();
 
 #ifdef DEBUG_ENABLED
-	void start_counting_ticks();
-	void stop_counting_ticks();
+	_FORCE_INLINE_ void start_counting_ticks() { prof_ticks.set(OS::get_singleton()->get_ticks_usec()); }
+	_FORCE_INLINE_ void stop_counting_ticks() { prof_time.add(OS::get_singleton()->get_ticks_usec() - prof_ticks.get()); }
 #else
 	_FORCE_INLINE_ void start_counting_ticks() {}
 	_FORCE_INLINE_ void stop_counting_ticks() {}
@@ -561,3 +563,5 @@ protected:
 public:
 	AudioBusLayout();
 };
+
+typedef AudioServer AS;

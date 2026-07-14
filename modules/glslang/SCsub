@@ -52,6 +52,7 @@ if env["builtin_glslang"]:
         "SPIRV/Logger.cpp",
         "SPIRV/SpvBuilder.cpp",
         "SPIRV/SpvPostProcess.cpp",
+        "SPIRV/SPVRemapper.cpp",
         "SPIRV/SpvTools.cpp",
     ]
 

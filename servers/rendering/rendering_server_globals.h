@@ -32,6 +32,9 @@
 
 #include "servers/rendering/environment/renderer_fog.h"
 #include "servers/rendering/environment/renderer_gi.h"
+#include "servers/rendering/renderer_canvas_cull.h"
+#include "servers/rendering/renderer_canvas_render.h"
+#include "servers/rendering/rendering_method.h"
 #include "servers/rendering/storage/camera_attributes_storage.h"
 #include "servers/rendering/storage/light_storage.h"
 #include "servers/rendering/storage/material_storage.h"
@@ -40,9 +43,7 @@
 #include "servers/rendering/storage/texture_storage.h"
 #include "servers/rendering/storage/utilities.h"
 
-class RendererCompositor;
 class RendererCanvasCull;
-class RendererCanvasRender;
 class RendererViewport;
 class RenderingMethod;
 

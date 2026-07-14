@@ -41,7 +41,7 @@ def version_hash_builder(target, source, env):
 #include "core/version.h"
 
 const char *const GODOT_VERSION_HASH = "{git_hash}";
-const unsigned long long GODOT_VERSION_TIMESTAMP = {git_timestamp};
+const uint64_t GODOT_VERSION_TIMESTAMP = {git_timestamp};
 """.format(**source[0].read())
         )
 
@@ -65,20 +65,33 @@ def encryption_key_builder(target, source, env):
     with methods.generated_wrapper(str(target[0])) as file:
         file.write(
             f"""\
-#include <cstdint>
+#include "core/config/project_settings.h"
+#include <string.h>
 
-// Only the XOR-obfuscated form rests in static storage. The real key is decrypted into
-// the caller's buffer on demand; the caller must zero it after use so the plaintext key
-// is never resident in memory longer than a single pack-open needs.
 static const uint8_t obfuscated_script_encryption_key[32] = {{
-{methods.format_buffer(obfuscated, 1)}
+	{methods.format_buffer(obfuscated, 1)}
 }};
 
-void get_script_encryption_key(uint8_t r_key[32]) {{
+uint8_t script_encryption_key[32] = {{ 0 }};
+
+static void decrypt_script_encryption_key(void) {{
 	for (int i = 0; i < 32; i++) {{
-		r_key[i] = obfuscated_script_encryption_key[i] ^ 0xA5;
+		script_encryption_key[i] = obfuscated_script_encryption_key[i] ^ 0xA5;
 	}}
-}}"""
+}}
+
+#if defined(__GNUC__) || defined(__clang__)
+__attribute__((constructor))
+static void _init_script_encryption_key(void) {{
+	decrypt_script_encryption_key();
+}}
+#elif defined(_MSC_VER)
+#pragma section(".CRT$XCU", read)
+static void __cdecl _msvc_init_script_encryption_key(void) {{
+	decrypt_script_encryption_key();
+}}
+__declspec(allocate(".CRT$XCU")) void(__cdecl * _msvc_init_script_encryption_key_ptr)(void) = _msvc_init_script_encryption_key;
+#endif"""
         )
 
 
@@ -98,7 +111,7 @@ def make_certs_header(target, source, env):
 inline constexpr int _certs_compressed_size = {len(buffer)};
 inline constexpr int _certs_uncompressed_size = {decomp_size};
 inline constexpr unsigned char _certs_compressed[] = {{
-{methods.format_buffer(buffer, 1)}
+	{methods.format_buffer(buffer, 1)}
 }};
 """)
 

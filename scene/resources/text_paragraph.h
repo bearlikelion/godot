@@ -30,7 +30,6 @@
 
 #pragma once
 
-#include "core/os/thread_safe.h"
 #include "core/templates/local_vector.h"
 #include "scene/resources/font.h"
 #include "servers/text/text_server.h"

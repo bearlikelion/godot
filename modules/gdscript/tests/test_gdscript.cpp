@@ -35,7 +35,6 @@
 #include "../gdscript_parser.h"
 #include "../gdscript_tokenizer.h"
 #include "../gdscript_tokenizer_buffer.h"
-#include "gdscript_test_runner.h"
 
 #include "core/config/project_settings.h"
 #include "core/io/file_access.h"
@@ -65,19 +64,19 @@ static void test_tokenizer(const String &p_code, const Vector<String> &p_lines) 
 		StringBuilder token;
 		token += " --> "; // Padding for line number.
 
-		// Files without trailing newline can produce dedent tokens on non-existent lines.
-		const String &start_line = current.start_line <= p_lines.size() ? p_lines[current.start_line - 1] : String();
-		const String &end_line = current.start_line <= p_lines.size() ? p_lines[current.start_line - 1] : String();
-
 		if (current.start_line != current.end_line) {
 			// Print "vvvvvv" to point at the token.
 			StringBuilder pointer;
 			pointer += "     "; // Padding for line number.
 
-			const int line_width = start_line.length() + start_line.count("\t") + (tab_size - 1);
-			const int start_offset = current.start_column - 1 + (current.start_column > 1 ? start_line.count("\t", 0, current.start_column - 1) * (tab_size - 1) : 0);
-			const int width = line_width - start_offset;
-			pointer += String::chr(' ').repeat(start_offset) + String::chr('v').repeat(width);
+			int line_width = 0;
+			if (current.start_line - 1 >= 0 && current.start_line - 1 < p_lines.size()) {
+				line_width = p_lines[current.start_line - 1].replace("\t", tab).length();
+			}
+
+			const int offset = MAX(0, current.start_column - 1);
+			const int width = MAX(0, line_width - current.start_column + 1);
+			pointer += String::chr(' ').repeat(offset) + String::chr('v').repeat(width);
 
 			print_line(pointer.as_string());
 		}
@@ -92,13 +91,12 @@ static void test_tokenizer(const String &p_code, const Vector<String> &p_lines) 
 			pointer += "     "; // Padding for line number.
 
 			if (current.start_line == current.end_line) {
-				const int start_offset = current.start_column - 1 + (current.start_column > 1 ? start_line.count("\t", 0, current.start_column - 1) * (tab_size - 1) : 0);
-				const int end_offset = current.end_column - 1 + (current.end_column > 1 ? end_line.count("\t", 0, current.end_column - 1) * (tab_size - 1) : 0);
-				const int width = end_offset - start_offset;
-				pointer += String::chr(' ').repeat(start_offset) + String::chr('^').repeat(width);
+				const int offset = MAX(0, current.start_column - 1);
+				const int width = MAX(0, current.end_column - current.start_column);
+				pointer += String::chr(' ').repeat(offset) + String::chr('^').repeat(width);
 			} else {
-				const int end_offset = current.end_column - 1 + (current.end_column > 1 ? end_line.count("\t", 0, current.end_column - 1) * (tab_size - 1) : 0);
-				pointer += String::chr('^').repeat(end_offset);
+				const int width = MAX(0, current.end_column - 1);
+				pointer += String::chr('^').repeat(width);
 			}
 
 			print_line(pointer.as_string());
@@ -177,7 +175,7 @@ static void test_parser(const String &p_code, const String &p_script_path, const
 	if (err != OK) {
 		const List<GDScriptParser::ParserError> &errors = parser.get_errors();
 		for (const GDScriptParser::ParserError &error : errors) {
-			print_line(vformat("%02d:%02d: %s", error.start_line, error.start_column, error.message));
+			print_line(vformat("%02d:%02d: %s", error.line, error.column, error.message));
 		}
 	}
 
@@ -187,7 +185,7 @@ static void test_parser(const String &p_code, const String &p_script_path, const
 	if (err != OK) {
 		const List<GDScriptParser::ParserError> &errors = parser.get_errors();
 		for (const GDScriptParser::ParserError &error : errors) {
-			print_line(vformat("%02d:%02d: %s", error.start_line, error.start_column, error.message));
+			print_line(vformat("%02d:%02d: %s", error.line, error.column, error.message));
 		}
 	}
 
@@ -263,7 +261,7 @@ static void test_compiler(const String &p_code, const String &p_script_path, con
 		print_line("Error in parser:");
 		const List<GDScriptParser::ParserError> &errors = parser.get_errors();
 		for (const GDScriptParser::ParserError &error : errors) {
-			print_line(vformat("%02d:%02d: %s", error.start_line, error.start_column, error.message));
+			print_line(vformat("%02d:%02d: %s", error.line, error.column, error.message));
 		}
 		return;
 	}
@@ -275,7 +273,7 @@ static void test_compiler(const String &p_code, const String &p_script_path, con
 		print_line("Error in analyzer:");
 		const List<GDScriptParser::ParserError> &errors = parser.get_errors();
 		for (const GDScriptParser::ParserError &error : errors) {
-			print_line(vformat("%02d:%02d: %s", error.start_line, error.start_column, error.message));
+			print_line(vformat("%02d:%02d: %s", error.line, error.column, error.message));
 		}
 		return;
 	}

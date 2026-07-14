@@ -34,10 +34,6 @@
 #import "godot_window.h"
 #import "key_mapping_macos.h"
 
-#include "core/input/input.h"
-#include "core/input/input_event.h"
-#include "core/os/keyboard.h"
-#include "core/os/os.h"
 #include "core/profiling/profiling.h"
 #include "main/main.h"
 
@@ -45,12 +41,12 @@
 
 - (id)init {
 	self = [super init];
-	window_id = DisplayServerEnums::INVALID_WINDOW_ID;
+	window_id = DisplayServer::INVALID_WINDOW_ID;
 	need_redraw = false;
 	return self;
 }
 
-- (void)setWindowID:(DisplayServerEnums::WindowID)wid {
+- (void)setWindowID:(DisplayServerMacOS::WindowID)wid {
 	window_id = wid;
 }
 
@@ -141,7 +137,7 @@
 - (id)init {
 	self = [super init];
 	layer_delegate = [[GodotContentLayerDelegate alloc] init];
-	window_id = DisplayServerEnums::INVALID_WINDOW_ID;
+	window_id = DisplayServer::INVALID_WINDOW_ID;
 	tracking_area = nil;
 	ime_input_event_in_progress = false;
 	mouse_down_control = false;
@@ -158,7 +154,7 @@
 	return self;
 }
 
-- (void)setWindowID:(DisplayServerEnums::WindowID)wid {
+- (void)setWindowID:(DisplayServerMacOS::WindowID)wid {
 	window_id = wid;
 	[layer_delegate setWindowID:window_id];
 }
@@ -435,7 +431,7 @@
 	DisplayServerMacOS *ds = (DisplayServerMacOS *)DisplayServer::get_singleton();
 	if (ds && ds->has_window(window_id)) {
 		DisplayServerMacOS::WindowData &wd = ds->get_window(window_id);
-		wd.edge = DisplayServerEnums::WINDOW_EDGE_MAX;
+		wd.edge = DisplayServer::WINDOW_EDGE_MAX;
 	}
 	if (([event modifierFlags] & NSEventModifierFlagControl)) {
 		mouse_down_control = true;
@@ -450,43 +446,43 @@
 	DisplayServerMacOS *ds = (DisplayServerMacOS *)DisplayServer::get_singleton();
 	if (ds && ds->has_window(window_id)) {
 		DisplayServerMacOS::WindowData &wd = ds->get_window(window_id);
-		if (wd.edge != DisplayServerEnums::WINDOW_EDGE_MAX) {
+		if (wd.edge != DisplayServer::WINDOW_EDGE_MAX) {
 			Size2i max_size = wd.max_size / ds->screen_get_max_scale();
 			Size2i min_size = wd.min_size / ds->screen_get_max_scale();
 			NSRect frame = [wd.window_object frame];
 			switch (wd.edge) {
-				case DisplayServerEnums::WINDOW_EDGE_TOP_LEFT: {
+				case DisplayServer::WINDOW_EDGE_TOP_LEFT: {
 					int clamped_dx = CLAMP(frame.size.width - event.deltaX, min_size.x, max_size.x) - frame.size.width;
 					int clamped_dy = CLAMP(frame.size.height - event.deltaY, min_size.y, max_size.y) - frame.size.height;
 					[wd.window_object setFrame:NSMakeRect(frame.origin.x - clamped_dx, frame.origin.y, frame.size.width + clamped_dx, frame.size.height + clamped_dy) display:YES];
 				} break;
-				case DisplayServerEnums::WINDOW_EDGE_TOP: {
+				case DisplayServer::WINDOW_EDGE_TOP: {
 					int clamped_dy = CLAMP(frame.size.height - event.deltaY, min_size.y, max_size.y) - frame.size.height;
 					[wd.window_object setFrame:NSMakeRect(frame.origin.x, frame.origin.y, frame.size.width, frame.size.height + clamped_dy) display:YES];
 				} break;
-				case DisplayServerEnums::WINDOW_EDGE_TOP_RIGHT: {
+				case DisplayServer::WINDOW_EDGE_TOP_RIGHT: {
 					int clamped_dx = CLAMP(frame.size.width + event.deltaX, min_size.x, max_size.x) - frame.size.width;
 					int clamped_dy = CLAMP(frame.size.height - event.deltaY, min_size.y, max_size.y) - frame.size.height;
 					[wd.window_object setFrame:NSMakeRect(frame.origin.x, frame.origin.y, frame.size.width + clamped_dx, frame.size.height + clamped_dy) display:YES];
 				} break;
-				case DisplayServerEnums::WINDOW_EDGE_LEFT: {
+				case DisplayServer::WINDOW_EDGE_LEFT: {
 					int clamped_dx = CLAMP(frame.size.width - event.deltaX, min_size.x, max_size.x) - frame.size.width;
 					[wd.window_object setFrame:NSMakeRect(frame.origin.x - clamped_dx, frame.origin.y, frame.size.width + clamped_dx, frame.size.height) display:YES];
 				} break;
-				case DisplayServerEnums::WINDOW_EDGE_RIGHT: {
+				case DisplayServer::WINDOW_EDGE_RIGHT: {
 					int clamped_dx = CLAMP(frame.size.width + event.deltaX, min_size.x, max_size.x) - frame.size.width;
 					[wd.window_object setFrame:NSMakeRect(frame.origin.x, frame.origin.y, frame.size.width + clamped_dx, frame.size.height) display:YES];
 				} break;
-				case DisplayServerEnums::WINDOW_EDGE_BOTTOM_LEFT: {
+				case DisplayServer::WINDOW_EDGE_BOTTOM_LEFT: {
 					int clamped_dx = CLAMP(frame.size.width - event.deltaX, min_size.x, max_size.x) - frame.size.width;
 					int clamped_dy = CLAMP(frame.size.height + event.deltaY, min_size.y, max_size.y) - frame.size.height;
 					[wd.window_object setFrame:NSMakeRect(frame.origin.x - clamped_dx, frame.origin.y - clamped_dy, frame.size.width + clamped_dx, frame.size.height + clamped_dy) display:YES];
 				} break;
-				case DisplayServerEnums::WINDOW_EDGE_BOTTOM: {
+				case DisplayServer::WINDOW_EDGE_BOTTOM: {
 					int clamped_dy = CLAMP(frame.size.height + event.deltaY, min_size.y, max_size.y) - frame.size.height;
 					[wd.window_object setFrame:NSMakeRect(frame.origin.x, frame.origin.y - clamped_dy, frame.size.width, frame.size.height + clamped_dy) display:YES];
 				} break;
-				case DisplayServerEnums::WINDOW_EDGE_BOTTOM_RIGHT: {
+				case DisplayServer::WINDOW_EDGE_BOTTOM_RIGHT: {
 					int clamped_dx = CLAMP(frame.size.width + event.deltaX, min_size.x, max_size.x) - frame.size.width;
 					int clamped_dy = CLAMP(frame.size.height + event.deltaY, min_size.y, max_size.y) - frame.size.height;
 					[wd.window_object setFrame:NSMakeRect(frame.origin.x, frame.origin.y - clamped_dy, frame.size.width + clamped_dx, frame.size.height + clamped_dy) display:YES];
@@ -504,7 +500,7 @@
 	DisplayServerMacOS *ds = (DisplayServerMacOS *)DisplayServer::get_singleton();
 	if (ds && ds->has_window(window_id)) {
 		DisplayServerMacOS::WindowData &wd = ds->get_window(window_id);
-		wd.edge = DisplayServerEnums::WINDOW_EDGE_MAX;
+		wd.edge = DisplayServer::WINDOW_EDGE_MAX;
 	}
 	if (mouse_down_control) {
 		[self processMouseEvent:event index:MouseButton::RIGHT pressed:false outofstream:false];
@@ -623,7 +619,7 @@
 		return;
 	}
 
-	if (ds->mouse_get_mode() != DisplayServerEnums::MOUSE_MODE_CAPTURED) {
+	if (ds->mouse_get_mode() != DisplayServer::MOUSE_MODE_CAPTURED) {
 		ds->mouse_exit_window(window_id);
 	}
 }
@@ -634,7 +630,7 @@
 		return;
 	}
 
-	if (ds->mouse_get_mode() != DisplayServerEnums::MOUSE_MODE_CAPTURED) {
+	if (ds->mouse_get_mode() != DisplayServer::MOUSE_MODE_CAPTURED) {
 		ds->mouse_enter_window(window_id);
 	}
 

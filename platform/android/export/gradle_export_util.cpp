@@ -30,50 +30,44 @@
 
 #include "gradle_export_util.h"
 
-#include "core/io/dir_access.h"
-#include "core/io/file_access.h"
-#include "core/os/os.h"
 #include "core/string/translation_server.h"
-#include "editor/export/editor_export.h"
-#include "editor/export/editor_export_plugin.h"
-
 #include "modules/regex/regex.h"
 
-int _get_android_orientation_value(DisplayServerEnums::ScreenOrientation screen_orientation) {
+int _get_android_orientation_value(DisplayServer::ScreenOrientation screen_orientation) {
 	switch (screen_orientation) {
-		case DisplayServerEnums::SCREEN_PORTRAIT:
+		case DisplayServer::SCREEN_PORTRAIT:
 			return 1;
-		case DisplayServerEnums::SCREEN_REVERSE_LANDSCAPE:
+		case DisplayServer::SCREEN_REVERSE_LANDSCAPE:
 			return 8;
-		case DisplayServerEnums::SCREEN_REVERSE_PORTRAIT:
+		case DisplayServer::SCREEN_REVERSE_PORTRAIT:
 			return 9;
-		case DisplayServerEnums::SCREEN_SENSOR_LANDSCAPE:
+		case DisplayServer::SCREEN_SENSOR_LANDSCAPE:
 			return 11;
-		case DisplayServerEnums::SCREEN_SENSOR_PORTRAIT:
+		case DisplayServer::SCREEN_SENSOR_PORTRAIT:
 			return 12;
-		case DisplayServerEnums::SCREEN_SENSOR:
+		case DisplayServer::SCREEN_SENSOR:
 			return 13;
-		case DisplayServerEnums::SCREEN_LANDSCAPE:
+		case DisplayServer::SCREEN_LANDSCAPE:
 		default:
 			return 0;
 	}
 }
 
-String _get_android_orientation_label(DisplayServerEnums::ScreenOrientation screen_orientation) {
+String _get_android_orientation_label(DisplayServer::ScreenOrientation screen_orientation) {
 	switch (screen_orientation) {
-		case DisplayServerEnums::SCREEN_PORTRAIT:
+		case DisplayServer::SCREEN_PORTRAIT:
 			return "portrait";
-		case DisplayServerEnums::SCREEN_REVERSE_LANDSCAPE:
+		case DisplayServer::SCREEN_REVERSE_LANDSCAPE:
 			return "reverseLandscape";
-		case DisplayServerEnums::SCREEN_REVERSE_PORTRAIT:
+		case DisplayServer::SCREEN_REVERSE_PORTRAIT:
 			return "reversePortrait";
-		case DisplayServerEnums::SCREEN_SENSOR_LANDSCAPE:
+		case DisplayServer::SCREEN_SENSOR_LANDSCAPE:
 			return "userLandscape";
-		case DisplayServerEnums::SCREEN_SENSOR_PORTRAIT:
+		case DisplayServer::SCREEN_SENSOR_PORTRAIT:
 			return "userPortrait";
-		case DisplayServerEnums::SCREEN_SENSOR:
+		case DisplayServer::SCREEN_SENSOR:
 			return "fullUser";
-		case DisplayServerEnums::SCREEN_LANDSCAPE:
+		case DisplayServer::SCREEN_LANDSCAPE:
 		default:
 			return "landscape";
 	}
@@ -188,12 +182,7 @@ Error rename_and_store_file_in_gradle_project(const Ref<EditorExportPreset> &p_p
 		return err;
 	}
 
-	String dst_path;
-	if (export_data->pd.salt.length() == 32) {
-		dst_path = export_data->assets_directory + String("/") + (simplified_path + export_data->pd.salt).sha256_text();
-	} else {
-		dst_path = export_data->assets_directory + String("/") + simplified_path.trim_prefix("res://");
-	}
+	const String dst_path = export_data->assets_directory + String("/") + simplified_path.trim_prefix("res://");
 	print_verbose("Saving project files from " + simplified_path + " into " + dst_path);
 	err = store_file_at_path(dst_path, enc_data);
 
@@ -312,7 +301,7 @@ String _get_activity_tag(const Ref<EditorExportPlatform> &p_export_platform, con
 	}
 
 	// Update the GodotApp activity tag.
-	String orientation = _get_android_orientation_label(DisplayServerEnums::ScreenOrientation(int(p_export_platform->get_project_setting(p_preset, "display/window/handheld/orientation"))));
+	String orientation = _get_android_orientation_label(DisplayServer::ScreenOrientation(int(p_export_platform->get_project_setting(p_preset, "display/window/handheld/orientation"))));
 	String manifest_activity_text = vformat(
 			"        <activity android:name=\".GodotApp\" "
 			"tools:replace=\"android:screenOrientation,android:excludeFromRecents,android:resizeableActivity\" "

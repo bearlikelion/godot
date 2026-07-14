@@ -33,8 +33,6 @@
 #include "core/io/resource.h"
 #include "scene/main/node.h"
 
-class PackedScene;
-
 class SceneState : public RefCounted {
 	GDCLASS(SceneState, RefCounted);
 

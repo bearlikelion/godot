@@ -31,10 +31,7 @@
 #include "compressed_texture.h"
 
 #include "core/io/file_access.h"
-#include "core/io/resource_loader.h"
-#include "core/object/class_db.h"
 #include "scene/resources/bit_map.h"
-#include "servers/rendering/rendering_server.h"
 
 Error CompressedTexture2D::_load_data(const String &p_path, int &r_width, int &r_height, Ref<Image> &image, bool &r_request_3d, bool &r_request_normal, bool &r_request_roughness, int &mipmap_limit, int p_size_limit) {
 	alpha_cache.unref();
@@ -107,7 +104,7 @@ void CompressedTexture2D::_requested_3d(void *p_ud) {
 	request_3d_callback(ctex);
 }
 
-void CompressedTexture2D::_requested_roughness(void *p_ud, const String &p_normal_path, RSE::TextureDetectRoughnessChannel p_roughness_channel) {
+void CompressedTexture2D::_requested_roughness(void *p_ud, const String &p_normal_path, RS::TextureDetectRoughnessChannel p_roughness_channel) {
 	CompressedTexture2D *ct = (CompressedTexture2D *)p_ud;
 	Ref<CompressedTexture2D> ctex(ct);
 	ERR_FAIL_NULL(request_roughness_callback);
@@ -241,35 +238,11 @@ bool CompressedTexture2D::has_alpha() const {
 }
 
 Ref<Image> CompressedTexture2D::get_image() const {
-	// Reload image from disk when path is available.
-	// On WebGPU (single-threaded WASM), RS::texture_2d_get() triggers an async
-	// GPU readback that returns zeros and never completes synchronously.
-	// Loading from disk is always correct and avoids the GPU round-trip.
-	if (!path_to_file.is_empty()) {
-		Ref<FileAccess> f = FileAccess::open(path_to_file, FileAccess::READ);
-		if (f.is_valid()) {
-			uint8_t header[4];
-			f->get_buffer(header, 4);
-			if (header[0] == 'G' && header[1] == 'S' && header[2] == 'T' && header[3] == '2') {
-				f->get_32(); // version
-				f->get_32(); // width
-				f->get_32(); // height
-				f->get_32(); // data format
-				f->get_32(); // mipmap limit
-				f->get_32(); // reserved
-				f->get_32(); // reserved
-				f->get_32(); // reserved
-				Ref<Image> img = load_image_from_file(f, 0);
-				if (img.is_valid() && !img->is_empty()) {
-					return img;
-				}
-			}
-		}
-	}
 	if (texture.is_valid()) {
 		return RS::get_singleton()->texture_2d_get(texture);
+	} else {
+		return Ref<Image>();
 	}
-	return Ref<Image>();
 }
 
 bool CompressedTexture2D::is_pixel_opaque(int p_x, int p_y) const {
@@ -490,6 +463,35 @@ CompressedTexture2D::~CompressedTexture2D() {
 	}
 }
 
+Ref<Resource> ResourceFormatLoaderCompressedTexture2D::load(const String &p_path, const String &p_original_path, Error *r_error, bool p_use_sub_threads, float *r_progress, CacheMode p_cache_mode) {
+	Ref<CompressedTexture2D> st;
+	st.instantiate();
+	Error err = st->load(p_path);
+	if (r_error) {
+		*r_error = err;
+	}
+	if (err != OK) {
+		return Ref<Resource>();
+	}
+
+	return st;
+}
+
+void ResourceFormatLoaderCompressedTexture2D::get_recognized_extensions(List<String> *p_extensions) const {
+	p_extensions->push_back("ctex");
+}
+
+bool ResourceFormatLoaderCompressedTexture2D::handles_type(const String &p_type) const {
+	return p_type == "CompressedTexture2D";
+}
+
+String ResourceFormatLoaderCompressedTexture2D::get_resource_type(const String &p_path) const {
+	if (p_path.has_extension("ctex")) {
+		return "CompressedTexture2D";
+	}
+	return "";
+}
+
 void CompressedTexture3D::set_path(const String &p_path, bool p_take_over) {
 	if (texture.is_valid()) {
 		RenderingServer::get_singleton()->texture_set_path(texture, p_path);
@@ -645,6 +647,35 @@ CompressedTexture3D::~CompressedTexture3D() {
 	}
 }
 
+Ref<Resource> ResourceFormatLoaderCompressedTexture3D::load(const String &p_path, const String &p_original_path, Error *r_error, bool p_use_sub_threads, float *r_progress, CacheMode p_cache_mode) {
+	Ref<CompressedTexture3D> st;
+	st.instantiate();
+	Error err = st->load(p_path);
+	if (r_error) {
+		*r_error = err;
+	}
+	if (err != OK) {
+		return Ref<Resource>();
+	}
+
+	return st;
+}
+
+void ResourceFormatLoaderCompressedTexture3D::get_recognized_extensions(List<String> *p_extensions) const {
+	p_extensions->push_back("ctex3d");
+}
+
+bool ResourceFormatLoaderCompressedTexture3D::handles_type(const String &p_type) const {
+	return p_type == "CompressedTexture3D";
+}
+
+String ResourceFormatLoaderCompressedTexture3D::get_resource_type(const String &p_path) const {
+	if (p_path.has_extension("ctex3d")) {
+		return "CompressedTexture3D";
+	}
+	return "";
+}
+
 void CompressedTextureLayered::set_path(const String &p_path, bool p_take_over) {
 	if (texture.is_valid()) {
 		RenderingServer::get_singleton()->texture_set_path(texture, p_path);
@@ -712,10 +743,10 @@ Error CompressedTextureLayered::load(const String &p_path) {
 	}
 
 	if (texture.is_valid()) {
-		RID new_texture = RS::get_singleton()->texture_2d_layered_create(images, RSE::TextureLayeredType(layered_type));
+		RID new_texture = RS::get_singleton()->texture_2d_layered_create(images, RS::TextureLayeredType(layered_type));
 		RS::get_singleton()->texture_replace(texture, new_texture);
 	} else {
-		texture = RS::get_singleton()->texture_2d_layered_create(images, RSE::TextureLayeredType(layered_type));
+		texture = RS::get_singleton()->texture_2d_layered_create(images, RS::TextureLayeredType(layered_type));
 	}
 
 	w = images[0]->get_width();
@@ -762,7 +793,7 @@ TextureLayered::LayeredType CompressedTextureLayered::get_layered_type() const {
 
 RID CompressedTextureLayered::get_rid() const {
 	if (!texture.is_valid()) {
-		texture = RS::get_singleton()->texture_2d_layered_placeholder_create(RSE::TextureLayeredType(layered_type));
+		texture = RS::get_singleton()->texture_2d_layered_placeholder_create(RS::TextureLayeredType(layered_type));
 	}
 	return texture;
 }
@@ -807,4 +838,60 @@ CompressedTextureLayered::~CompressedTextureLayered() {
 		ERR_FAIL_NULL(RenderingServer::get_singleton());
 		RS::get_singleton()->free_rid(texture);
 	}
+}
+
+/////////////////////////////////////////////////
+
+Ref<Resource> ResourceFormatLoaderCompressedTextureLayered::load(const String &p_path, const String &p_original_path, Error *r_error, bool p_use_sub_threads, float *r_progress, CacheMode p_cache_mode) {
+	Ref<CompressedTextureLayered> ct;
+	if (p_path.has_extension("ctexarray")) {
+		Ref<CompressedTexture2DArray> c;
+		c.instantiate();
+		ct = c;
+	} else if (p_path.has_extension("ccube")) {
+		Ref<CompressedCubemap> c;
+		c.instantiate();
+		ct = c;
+	} else if (p_path.has_extension("ccubearray")) {
+		Ref<CompressedCubemapArray> c;
+		c.instantiate();
+		ct = c;
+	} else {
+		if (r_error) {
+			*r_error = ERR_FILE_UNRECOGNIZED;
+		}
+		return Ref<Resource>();
+	}
+	Error err = ct->load(p_path);
+	if (r_error) {
+		*r_error = err;
+	}
+	if (err != OK) {
+		return Ref<Resource>();
+	}
+
+	return ct;
+}
+
+void ResourceFormatLoaderCompressedTextureLayered::get_recognized_extensions(List<String> *p_extensions) const {
+	p_extensions->push_back("ctexarray");
+	p_extensions->push_back("ccube");
+	p_extensions->push_back("ccubearray");
+}
+
+bool ResourceFormatLoaderCompressedTextureLayered::handles_type(const String &p_type) const {
+	return p_type == "CompressedTexture2DArray" || p_type == "CompressedCubemap" || p_type == "CompressedCubemapArray";
+}
+
+String ResourceFormatLoaderCompressedTextureLayered::get_resource_type(const String &p_path) const {
+	if (p_path.has_extension("ctexarray")) {
+		return "CompressedTexture2DArray";
+	}
+	if (p_path.has_extension("ccube")) {
+		return "CompressedCubemap";
+	}
+	if (p_path.has_extension("ccubearray")) {
+		return "CompressedCubemapArray";
+	}
+	return "";
 }

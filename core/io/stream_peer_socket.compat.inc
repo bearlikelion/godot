@@ -30,10 +30,6 @@
 
 #ifndef DISABLE_DEPRECATED
 
-#include "stream_peer_socket.h"
-
-#include "core/object/class_db.h"
-
 namespace compat::StreamPeerTCP {
 enum class Status {
 	STATUS_NONE = StreamPeerSocket::STATUS_NONE,
@@ -53,4 +49,4 @@ void StreamPeerSocket::_bind_compatibility_methods() {
 	ClassDB::bind_compatibility_method(D_METHOD("get_status"), &StreamPeerSocket::_get_status_compat_107954);
 }
 
-#endif // DISABLE_DEPRECATED
+#endif

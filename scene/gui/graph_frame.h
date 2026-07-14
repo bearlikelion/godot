@@ -60,8 +60,6 @@ private:
 	bool tint_color_enabled = false;
 	Color tint_color = Color(0.3, 0.3, 0.3, 0.75);
 
-	Size2 _get_minimum_size(bool p_use_desired_sizes) const;
-
 protected:
 	virtual void gui_input(const Ref<InputEvent> &p_event) override;
 	virtual CursorShape get_cursor_shape(const Point2 &p_pos = Point2i()) const override;
@@ -97,7 +95,6 @@ public:
 
 	virtual bool has_point(const Point2 &p_point) const override;
 	virtual Size2 get_minimum_size() const override;
-	virtual Size2 get_desired_size() const override;
 
 	GraphFrame();
 };

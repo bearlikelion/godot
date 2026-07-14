@@ -30,6 +30,7 @@
 
 #pragma once
 
+#include "core/variant/typed_dictionary.h"
 #include "scene/gui/box_container.h"
 #include "scene/gui/graph_frame.h"
 #include "scene/gui/graph_node.h"

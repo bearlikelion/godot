@@ -31,7 +31,6 @@
 #include "marshalls.h"
 
 #include "core/io/resource_loader.h"
-#include "core/object/class_db.h"
 #include "core/object/ref_counted.h"
 #include "core/object/script_language.h"
 #include "core/variant/container_type_validate.h"

@@ -37,14 +37,6 @@ static const float SPRITE_FRAME_MINIMUM_DURATION = 0.01;
 class SpriteFrames : public Resource {
 	GDCLASS(SpriteFrames, Resource);
 
-public:
-	enum LoopMode {
-		LOOP_NONE,
-		LOOP_LINEAR,
-		LOOP_PINGPONG,
-	};
-
-private:
 	struct Frame {
 		Ref<Texture2D> texture;
 		float duration = 1.0;
@@ -52,7 +44,7 @@ private:
 
 	struct Anim {
 		double speed = 5.0;
-		LoopMode loop = LoopMode::LOOP_LINEAR;
+		bool loop = true;
 		Vector<Frame> frames;
 	};
 
@@ -77,13 +69,8 @@ public:
 	void set_animation_speed(const StringName &p_anim, double p_fps);
 	double get_animation_speed(const StringName &p_anim) const;
 
-#ifndef DISABLE_DEPRECATED
 	void set_animation_loop(const StringName &p_anim, bool p_loop);
 	bool get_animation_loop(const StringName &p_anim) const;
-#endif
-
-	void set_animation_loop_mode(const StringName &p_anim, LoopMode p_loop_mode);
-	LoopMode get_animation_loop_mode(const StringName &p_anim) const;
 
 	void add_frame(const StringName &p_anim, const Ref<Texture2D> &p_texture, float p_duration = 1.0, int p_at_pos = -1);
 	void set_frame(const StringName &p_anim, int p_idx, const Ref<Texture2D> &p_texture, float p_duration = 1.0);
@@ -122,5 +109,3 @@ public:
 
 	SpriteFrames();
 };
-
-VARIANT_ENUM_CAST(SpriteFrames::LoopMode);

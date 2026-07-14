@@ -139,7 +139,7 @@ void BodyInterface::AddBody(const BodyID &inBodyID, EActivation inActivationMode
 void BodyInterface::RemoveBody(const BodyID &inBodyID)
 {
 	BodyLockWrite lock(*mBodyLockInterface, inBodyID);
-	if (lock.SucceededAndIsInBroadPhase())
+	if (lock.Succeeded())
 	{
 		const Body &body = lock.GetBody();
 

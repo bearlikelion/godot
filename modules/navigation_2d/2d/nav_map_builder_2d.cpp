@@ -31,6 +31,8 @@
 #include "nav_map_builder_2d.h"
 
 #include "../nav_link_2d.h"
+#include "../nav_map_2d.h"
+#include "../nav_region_2d.h"
 #include "../triangle2.h"
 #include "nav_map_iteration_2d.h"
 #include "nav_region_iteration_2d.h"

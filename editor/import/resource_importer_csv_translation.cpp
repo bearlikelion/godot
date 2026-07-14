@@ -235,18 +235,10 @@ Error ResourceImporterCSVTranslation::import(ResourceUID::ID p_source_id, const 
 	for (KeyValue<int, Ref<Translation>> E : column_to_translation) {
 		Ref<Translation> xlt = E.value;
 
-		if (xlt->get_message_count() == 0) {
-			WARN_PRINT(vformat("Locale '%s' does not contain any translation. This locale will be ignored.", xlt->get_locale()));
-			continue;
-		}
-
 		if (compress) {
 			Ref<OptimizedTranslation> cxl = memnew(OptimizedTranslation);
-			if (cxl->generate(xlt)) {
-				xlt = cxl;
-			} else {
-				WARN_PRINT(vformat("Failed to compress locale '%s'.", xlt->get_locale()));
-			}
+			cxl->generate(xlt);
+			xlt = cxl;
 		}
 
 		String save_path = p_source_file.get_basename() + "." + xlt->get_locale() + ".translation";

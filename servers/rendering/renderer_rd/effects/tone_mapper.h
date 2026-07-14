@@ -34,6 +34,8 @@
 #include "servers/rendering/renderer_rd/shaders/effects/tonemap.glsl.gen.h"
 #include "servers/rendering/renderer_rd/shaders/effects/tonemap_mobile.glsl.gen.h"
 
+#include "servers/rendering/rendering_server.h"
+
 namespace RendererRD {
 
 class ToneMapper {
@@ -107,7 +109,7 @@ private:
 
 		float pixel_size[2]; //  8 - 24
 		uint32_t tonemapper; //  4 - 28
-		float output_max_value; //  4 - 32
+		uint32_t pad; //  4 - 32
 
 		uint32_t glow_texture_size[2]; //  8 - 40
 		float glow_intensity; //  4 - 44
@@ -137,8 +139,6 @@ private:
 		float white; //  4 - 48
 
 		float tonemapper_params[4]; //  16 - 64
-		float output_max_value; //  4 - 68
-		float pad[3]; //  12 - 80
 	};
 
 	/* tonemap actually writes to a framebuffer, which is
@@ -165,7 +165,7 @@ public:
 
 	struct TonemapSettings {
 		bool use_glow = false;
-		RSE::EnvironmentGlowBlendMode glow_mode = RSE::ENV_GLOW_BLEND_MODE_SCREEN;
+		RS::EnvironmentGlowBlendMode glow_mode = RS::ENV_GLOW_BLEND_MODE_SCREEN;
 		float glow_intensity = 0.3;
 		float glow_map_strength = 0.0f;
 		float glow_levels[7] = { 1.0, 0.8, 0.4, 0.1, 0.0, 0.0, 0.0 };
@@ -174,11 +174,10 @@ public:
 		RID glow_texture;
 		RID glow_map;
 
-		RSE::EnvironmentToneMapper tonemap_mode = RSE::ENV_TONE_MAPPER_LINEAR;
+		RS::EnvironmentToneMapper tonemap_mode = RS::ENV_TONE_MAPPER_LINEAR;
 		float tonemapper_params[4] = { 0.0, 0.0, 0.0, 0.0 };
 		float exposure = 1.0;
 		float white = 1.0;
-		float max_value = 1.0;
 
 		bool use_auto_exposure = false;
 		float auto_exposure_scale = 0.5;
@@ -204,7 +203,6 @@ public:
 		Vector2i texture_size;
 		Vector2i dest_texture_size;
 		uint32_t view_count = 1;
-		bool bilinear_filtering = true;
 
 		bool convert_to_srgb = false;
 	};

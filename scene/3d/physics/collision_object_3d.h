@@ -30,7 +30,6 @@
 
 #pragma once
 
-#include "core/templates/rb_map.h"
 #include "scene/3d/camera_3d.h"
 #include "scene/3d/node_3d.h"
 #include "scene/resources/3d/shape_3d.h"

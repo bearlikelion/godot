@@ -138,8 +138,8 @@ void EngineDebugger::initialize(const String &p_uri, bool p_skip_breakpoints, bo
 		CreatePeerFunc *create_fn = protocols.getptr(proto);
 		ERR_FAIL_NULL_MSG(create_fn, vformat("Invalid protocol: %s.", proto));
 
-		Ref<RemoteDebuggerPeer> peer = (*create_fn)(p_uri);
-		if (peer.is_null()) {
+		RemoteDebuggerPeer *peer = (*create_fn)(p_uri);
+		if (!peer) {
 			return;
 		}
 		singleton = memnew(RemoteDebugger(Ref<RemoteDebuggerPeer>(peer)));

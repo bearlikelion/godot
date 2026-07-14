@@ -39,51 +39,31 @@
 #define DEBUG_LOG_WAYLAND(...)
 #endif
 
-#include "core/config/project_settings.h"
-#include "core/input/input.h"
-#include "core/input/input_event.h"
 #include "core/os/main_loop.h"
-#include "core/os/os.h"
-#include "servers/display/accessibility_server.h"
-#include "servers/display/native_menu.h"
 #include "servers/rendering/dummy/rasterizer_dummy.h"
-#include "servers/rendering/rendering_server.h"
 
-#ifdef RD_ENABLED
 #ifdef VULKAN_ENABLED
-#include "wayland/rendering_context_driver_vulkan_wayland.h"
-#endif
-#ifdef WEBGPU_ENABLED
-#include "wayland/rendering_context_driver_webgpu_wayland.h"
-#endif
-
 #include "servers/rendering/renderer_rd/renderer_compositor_rd.h"
 #endif
 
 #ifdef GLES3_ENABLED
+#include "core/io/file_access.h"
 #include "detect_prime_egl.h"
+#include "drivers/gles3/rasterizer_gles3.h"
 #include "wayland/egl_manager_wayland.h"
 #include "wayland/egl_manager_wayland_gles.h"
+#endif
 
-#include "core/io/file_access.h"
-#include "drivers/egl/egl_manager.h"
-#include "drivers/gles3/rasterizer_gles3.h"
+#ifdef ACCESSKIT_ENABLED
+#include "drivers/accesskit/accessibility_driver_accesskit.h"
 #endif
 
 #ifdef DBUS_ENABLED
-#include "freedesktop_at_spi_monitor.h"
-#include "freedesktop_portal_desktop.h"
-#include "freedesktop_screensaver.h"
-
 #ifdef SOWRAP_ENABLED
 #include "dbus-so_wrap.h"
 #else
 #include <dbus/dbus.h>
 #endif
-#endif
-
-#ifdef SPEECHD_ENABLED
-#include "tts_linux.h"
 #endif
 
 #define WAYLAND_MAX_FRAME_TIME_US (1'000'000)
@@ -95,19 +75,19 @@
 #define WAYLAND_FRAME_CALLBACK_TIMEOUT_MS_DEFAULT (100)
 #define WINDOW_READY_TIMEOUT_MS (10'000)
 
-String DisplayServerWayland::_get_app_id_from_context(DisplayServerEnums::Context p_context) {
+String DisplayServerWayland::_get_app_id_from_context(Context p_context) {
 	String app_id;
 
 	switch (p_context) {
-		case DisplayServerEnums::CONTEXT_EDITOR: {
+		case CONTEXT_EDITOR: {
 			app_id = "org.godotengine.Editor";
 		} break;
 
-		case DisplayServerEnums::CONTEXT_PROJECTMAN: {
+		case CONTEXT_PROJECTMAN: {
 			app_id = "org.godotengine.ProjectManager";
 		} break;
 
-		case DisplayServerEnums::CONTEXT_ENGINE:
+		case CONTEXT_ENGINE:
 		default: {
 			String config_name = GLOBAL_GET("application/config/name");
 			if (config_name.length() != 0) {
@@ -121,7 +101,7 @@ String DisplayServerWayland::_get_app_id_from_context(DisplayServerEnums::Contex
 	return app_id;
 }
 
-void DisplayServerWayland::_send_window_event(DisplayServerEnums::WindowEvent p_event, DisplayServerEnums::WindowID p_window_id) {
+void DisplayServerWayland::_send_window_event(WindowEvent p_event, WindowID p_window_id) {
 	ERR_FAIL_COND(!windows.has(p_window_id));
 
 	WindowData &wd = windows[p_window_id];
@@ -140,7 +120,7 @@ void DisplayServerWayland::_dispatch_input_event(const Ref<InputEvent> &p_event)
 	Ref<InputEventFromWindow> event_from_window = p_event;
 
 	if (event_from_window.is_valid()) {
-		DisplayServerEnums::WindowID window_id = event_from_window->get_window_id();
+		WindowID window_id = event_from_window->get_window_id();
 
 		Ref<InputEventKey> key_event = p_event;
 		if (!popup_menu_list.is_empty() && key_event.is_valid()) {
@@ -150,11 +130,6 @@ void DisplayServerWayland::_dispatch_input_event(const Ref<InputEvent> &p_event)
 
 		// Send to a single window.
 		if (windows.has(window_id)) {
-			Ref<InputEventMouse> iev_mouse = p_event;
-			if (iev_mouse.is_valid()) {
-				mouse_pos = iev_mouse->get_position() + windows[window_id].rect.position;
-			}
-
 			Callable callable = windows[window_id].input_event_callback;
 			if (callable.is_valid()) {
 				callable.call(p_event);
@@ -163,7 +138,7 @@ void DisplayServerWayland::_dispatch_input_event(const Ref<InputEvent> &p_event)
 	} else {
 		// Send to all windows. Copy all pending callbacks, since callback can erase window.
 		Vector<Callable> cbs;
-		for (KeyValue<DisplayServerEnums::WindowID, WindowData> &E : windows) {
+		for (KeyValue<WindowID, WindowData> &E : windows) {
 			Callable callable = E.value.input_event_callback;
 			if (callable.is_valid()) {
 				cbs.push_back(callable);
@@ -176,23 +151,23 @@ void DisplayServerWayland::_dispatch_input_event(const Ref<InputEvent> &p_event)
 	}
 }
 
-void DisplayServerWayland::_delete_window(DisplayServerEnums::WindowID p_window_id) {
+void DisplayServerWayland::_delete_window(WindowID p_window_id) {
 	ERR_FAIL_COND(!windows.has(p_window_id));
 	WindowData &wd = windows[p_window_id];
 
 	ERR_FAIL_COND(!windows.has(wd.root_id));
 	WindowData &root_wd = windows[wd.root_id];
 
-	// We need to clear the hovered window now. By the time we'll get a hover
-	// change from the thread, it will be already gone and we won't have anywhere
-	// to send the mouse exit event to.
-	if (hovered_window_id == p_window_id) {
-		_hover_window(DisplayServerEnums::INVALID_WINDOW_ID);
+	// NOTE: By the time the Wayland thread will send a `WINDOW_EVENT_MOUSE_EXIT`
+	// the window will be gone and the message will be discarded, confusing the
+	// engine. We thus have to send it ourselves.
+	if (wayland_thread.pointer_get_pointed_window_id() == p_window_id) {
+		_send_window_event(WINDOW_EVENT_MOUSE_EXIT, p_window_id);
 	}
 
 	// The XDG shell specification requires us to clear all popups in reverse order.
 	while (!root_wd.popup_stack.is_empty() && root_wd.popup_stack.back()->get() != p_window_id) {
-		_send_window_event(DisplayServerEnums::WINDOW_EVENT_FORCE_CLOSE, root_wd.popup_stack.back()->get());
+		_send_window_event(WINDOW_EVENT_FORCE_CLOSE, root_wd.popup_stack.back()->get());
 	}
 
 	if (root_wd.popup_stack.back() && root_wd.popup_stack.back()->get() == p_window_id) {
@@ -203,7 +178,11 @@ void DisplayServerWayland::_delete_window(DisplayServerEnums::WindowID p_window_
 		popup_menu_list.pop_back();
 	}
 
-	AccessibilityServer::get_singleton()->window_destroy(p_window_id);
+#ifdef ACCESSKIT_ENABLED
+	if (accessibility_driver) {
+		accessibility_driver->window_destroy(p_window_id);
+	}
+#endif
 
 	if (wd.visible) {
 #ifdef VULKAN_ENABLED
@@ -232,7 +211,7 @@ void DisplayServerWayland::_delete_window(DisplayServerEnums::WindowID p_window_
 	DEBUG_LOG_WAYLAND(vformat("Destroyed window %d", p_window_id));
 }
 
-void DisplayServerWayland::_update_window_rect(const Rect2i &p_rect, DisplayServerEnums::WindowID p_window_id) {
+void DisplayServerWayland::_update_window_rect(const Rect2i &p_rect, WindowID p_window_id) {
 	ERR_FAIL_COND(!windows.has(p_window_id));
 
 	WindowData &wd = windows[p_window_id];
@@ -260,85 +239,58 @@ void DisplayServerWayland::_update_window_rect(const Rect2i &p_rect, DisplayServ
 	}
 }
 
-void DisplayServerWayland::_hover_window(DisplayServerEnums::WindowID p_window_id) {
-	if (hovered_window_id == p_window_id) {
-		return;
-	}
-
-	// NOTE: _send_window_event invokes callbacks and might have side effects!
-	// (e.g. a popup indirectly calling this method again). Make sure to do all of
-	// your bookkeping BEFORE sending window events!
-
-	DisplayServerEnums::WindowID old_hover = hovered_window_id;
-
-	if (old_hover != DisplayServerEnums::INVALID_WINDOW_ID) {
-		hovered_window_id = DisplayServerEnums::INVALID_WINDOW_ID;
-
-		DEBUG_LOG_WAYLAND(vformat("[DEBUG] Notifying mouse exit to window %d.", old_hover));
-		_send_window_event(DisplayServerEnums::WINDOW_EVENT_MOUSE_EXIT, old_hover);
-	}
-
-	// The window might have been destroyed in the meantime.
-	if (p_window_id != DisplayServerEnums::INVALID_WINDOW_ID && windows.has(p_window_id)) {
-		hovered_window_id = p_window_id;
-
-		DEBUG_LOG_WAYLAND(vformat("[DEBUG] Notifying mouse enter to window %d.", p_window_id));
-		_send_window_event(DisplayServerEnums::WINDOW_EVENT_MOUSE_ENTER, p_window_id);
-	}
-}
-
 // Interface methods.
 
-bool DisplayServerWayland::has_feature(DisplayServerEnums::Feature p_feature) const {
+bool DisplayServerWayland::has_feature(Feature p_feature) const {
 	switch (p_feature) {
 #ifndef DISABLE_DEPRECATED
-		case DisplayServerEnums::FEATURE_GLOBAL_MENU: {
+		case FEATURE_GLOBAL_MENU: {
 			return (native_menu && native_menu->has_feature(NativeMenu::FEATURE_GLOBAL_MENU));
 		} break;
 #endif
-		case DisplayServerEnums::FEATURE_TOUCHSCREEN:
-		case DisplayServerEnums::FEATURE_MOUSE:
-		case DisplayServerEnums::FEATURE_MOUSE_WARP:
-		case DisplayServerEnums::FEATURE_CLIPBOARD:
-		case DisplayServerEnums::FEATURE_CURSOR_SHAPE:
-		case DisplayServerEnums::FEATURE_CUSTOM_CURSOR_SHAPE:
-		case DisplayServerEnums::FEATURE_WINDOW_TRANSPARENCY:
-		case DisplayServerEnums::FEATURE_ICON:
-		case DisplayServerEnums::FEATURE_HIDPI:
-		case DisplayServerEnums::FEATURE_SWAP_BUFFERS:
-		case DisplayServerEnums::FEATURE_KEEP_SCREEN_ON:
-		case DisplayServerEnums::FEATURE_IME:
-		case DisplayServerEnums::FEATURE_WINDOW_DRAG:
-		case DisplayServerEnums::FEATURE_CLIPBOARD_PRIMARY:
-		case DisplayServerEnums::FEATURE_SUBWINDOWS:
-		case DisplayServerEnums::FEATURE_WINDOW_EMBEDDING:
-		case DisplayServerEnums::FEATURE_SELF_FITTING_WINDOWS:
-		case DisplayServerEnums::FEATURE_HDR_OUTPUT: {
+		case FEATURE_MOUSE:
+		case FEATURE_MOUSE_WARP:
+		case FEATURE_CLIPBOARD:
+		case FEATURE_CURSOR_SHAPE:
+		case FEATURE_CUSTOM_CURSOR_SHAPE:
+		case FEATURE_WINDOW_TRANSPARENCY:
+		case FEATURE_ICON:
+		case FEATURE_HIDPI:
+		case FEATURE_SWAP_BUFFERS:
+		case FEATURE_KEEP_SCREEN_ON:
+		case FEATURE_IME:
+		case FEATURE_WINDOW_DRAG:
+		case FEATURE_CLIPBOARD_PRIMARY:
+		case FEATURE_SUBWINDOWS:
+		case FEATURE_WINDOW_EMBEDDING:
+		case FEATURE_SELF_FITTING_WINDOWS: {
 			return true;
 		} break;
 
-		//case DisplayServerEnums::FEATURE_NATIVE_DIALOG:
-		//case DisplayServerEnums::FEATURE_NATIVE_DIALOG_INPUT:
+		//case FEATURE_NATIVE_DIALOG:
+		//case FEATURE_NATIVE_DIALOG_INPUT:
 #ifdef DBUS_ENABLED
-		case DisplayServerEnums::FEATURE_NATIVE_DIALOG_FILE:
-		case DisplayServerEnums::FEATURE_NATIVE_DIALOG_FILE_EXTRA:
-		case DisplayServerEnums::FEATURE_NATIVE_DIALOG_FILE_MIME: {
+		case FEATURE_NATIVE_DIALOG_FILE:
+		case FEATURE_NATIVE_DIALOG_FILE_EXTRA:
+		case FEATURE_NATIVE_DIALOG_FILE_MIME: {
 			return (portal_desktop && portal_desktop->is_supported() && portal_desktop->is_file_chooser_supported());
 		} break;
-		case DisplayServerEnums::FEATURE_NATIVE_COLOR_PICKER: {
+		case FEATURE_NATIVE_COLOR_PICKER: {
 			return (portal_desktop && portal_desktop->is_supported() && portal_desktop->is_screenshot_supported());
 		} break;
 #endif
 
 #ifdef SPEECHD_ENABLED
-		case DisplayServerEnums::FEATURE_TEXT_TO_SPEECH: {
+		case FEATURE_TEXT_TO_SPEECH: {
 			return true;
 		} break;
 #endif
 
-		case DisplayServerEnums::FEATURE_ACCESSIBILITY_SCREEN_READER: {
-			return AccessibilityServer::get_singleton()->is_supported();
+#ifdef ACCESSKIT_ENABLED
+		case FEATURE_ACCESSIBILITY_SCREEN_READER: {
+			return (accessibility_driver != nullptr);
 		} break;
+#endif
 
 		default: {
 			return false;
@@ -449,13 +401,13 @@ void DisplayServerWayland::set_system_theme_change_callback(const Callable &p_ca
 	portal_desktop->set_system_theme_change_callback(p_callable);
 }
 
-Error DisplayServerWayland::file_dialog_show(const String &p_title, const String &p_current_directory, const String &p_filename, bool p_show_hidden, DisplayServerEnums::FileDialogMode p_mode, const Vector<String> &p_filters, const Callable &p_callback, DisplayServerEnums::WindowID p_window_id) {
+Error DisplayServerWayland::file_dialog_show(const String &p_title, const String &p_current_directory, const String &p_filename, bool p_show_hidden, FileDialogMode p_mode, const Vector<String> &p_filters, const Callable &p_callback, WindowID p_window_id) {
 	ERR_FAIL_COND_V(!portal_desktop, ERR_UNAVAILABLE);
 	MutexLock mutex_lock(wayland_thread.mutex);
 
-	DisplayServerEnums::WindowID window_id = p_window_id;
-	if (!windows.has(window_id) || window_get_flag(DisplayServerEnums::WINDOW_FLAG_POPUP_WM_HINT, window_id)) {
-		window_id = DisplayServerEnums::MAIN_WINDOW_ID;
+	WindowID window_id = p_window_id;
+	if (!windows.has(window_id) || window_get_flag(WINDOW_FLAG_POPUP_WM_HINT, window_id)) {
+		window_id = MAIN_WINDOW_ID;
 	}
 
 	WaylandThread::WindowState *ws = wayland_thread.window_get_state(window_id);
@@ -464,13 +416,13 @@ Error DisplayServerWayland::file_dialog_show(const String &p_title, const String
 	return portal_desktop->file_dialog_show(window_id, (ws ? ws->exported_handle : String()), p_title, p_current_directory, String(), p_filename, p_mode, p_filters, TypedArray<Dictionary>(), p_callback, false);
 }
 
-Error DisplayServerWayland::file_dialog_with_options_show(const String &p_title, const String &p_current_directory, const String &p_root, const String &p_filename, bool p_show_hidden, DisplayServerEnums::FileDialogMode p_mode, const Vector<String> &p_filters, const TypedArray<Dictionary> &p_options, const Callable &p_callback, DisplayServerEnums::WindowID p_window_id) {
+Error DisplayServerWayland::file_dialog_with_options_show(const String &p_title, const String &p_current_directory, const String &p_root, const String &p_filename, bool p_show_hidden, FileDialogMode p_mode, const Vector<String> &p_filters, const TypedArray<Dictionary> &p_options, const Callable &p_callback, WindowID p_window_id) {
 	ERR_FAIL_COND_V(!portal_desktop, ERR_UNAVAILABLE);
 	MutexLock mutex_lock(wayland_thread.mutex);
 
-	DisplayServerEnums::WindowID window_id = p_window_id;
-	if (!windows.has(window_id) || window_get_flag(DisplayServerEnums::WINDOW_FLAG_POPUP_WM_HINT, window_id)) {
-		window_id = DisplayServerEnums::MAIN_WINDOW_ID;
+	WindowID window_id = p_window_id;
+	if (!windows.has(window_id) || window_get_flag(WINDOW_FLAG_POPUP_WM_HINT, window_id)) {
+		window_id = MAIN_WINDOW_ID;
 	}
 
 	WaylandThread::WindowState *ws = wayland_thread.window_get_state(window_id);
@@ -486,7 +438,7 @@ void DisplayServerWayland::beep() const {
 }
 
 void DisplayServerWayland::_mouse_update_mode() {
-	DisplayServerEnums::MouseMode wanted_mouse_mode = mouse_mode_override_enabled
+	MouseMode wanted_mouse_mode = mouse_mode_override_enabled
 			? mouse_mode_override
 			: mouse_mode_base;
 
@@ -496,19 +448,19 @@ void DisplayServerWayland::_mouse_update_mode() {
 
 	MutexLock mutex_lock(wayland_thread.mutex);
 
-	bool show_cursor = (wanted_mouse_mode == DisplayServerEnums::MOUSE_MODE_VISIBLE || wanted_mouse_mode == DisplayServerEnums::MOUSE_MODE_CONFINED);
+	bool show_cursor = (wanted_mouse_mode == MOUSE_MODE_VISIBLE || wanted_mouse_mode == MOUSE_MODE_CONFINED);
 
 	wayland_thread.cursor_set_visible(show_cursor);
 
 	WaylandThread::PointerConstraint constraint = WaylandThread::PointerConstraint::NONE;
 
 	switch (wanted_mouse_mode) {
-		case DisplayServerEnums::MOUSE_MODE_CAPTURED: {
+		case DisplayServer::MOUSE_MODE_CAPTURED: {
 			constraint = WaylandThread::PointerConstraint::LOCKED;
 		} break;
 
-		case DisplayServerEnums::MOUSE_MODE_CONFINED:
-		case DisplayServerEnums::MOUSE_MODE_CONFINED_HIDDEN: {
+		case DisplayServer::MOUSE_MODE_CONFINED:
+		case DisplayServer::MOUSE_MODE_CONFINED_HIDDEN: {
 			constraint = WaylandThread::PointerConstraint::CONFINED;
 		} break;
 
@@ -518,7 +470,7 @@ void DisplayServerWayland::_mouse_update_mode() {
 
 	wayland_thread.pointer_set_constraint(constraint);
 
-	if (wanted_mouse_mode == DisplayServerEnums::MOUSE_MODE_CAPTURED) {
+	if (wanted_mouse_mode == DisplayServer::MOUSE_MODE_CAPTURED) {
 		WindowData *pointed_win = windows.getptr(wayland_thread.pointer_get_pointed_window_id());
 		ERR_FAIL_NULL(pointed_win);
 		wayland_thread.pointer_set_hint(pointed_win->rect.size / 2);
@@ -527,8 +479,8 @@ void DisplayServerWayland::_mouse_update_mode() {
 	mouse_mode = wanted_mouse_mode;
 }
 
-void DisplayServerWayland::mouse_set_mode(DisplayServerEnums::MouseMode p_mode) {
-	ERR_FAIL_INDEX(p_mode, DisplayServerEnums::MouseMode::MOUSE_MODE_MAX);
+void DisplayServerWayland::mouse_set_mode(MouseMode p_mode) {
+	ERR_FAIL_INDEX(p_mode, MouseMode::MOUSE_MODE_MAX);
 	if (p_mode == mouse_mode_base) {
 		return;
 	}
@@ -536,12 +488,12 @@ void DisplayServerWayland::mouse_set_mode(DisplayServerEnums::MouseMode p_mode) 
 	_mouse_update_mode();
 }
 
-DisplayServerEnums::MouseMode DisplayServerWayland::mouse_get_mode() const {
+DisplayServerWayland::MouseMode DisplayServerWayland::mouse_get_mode() const {
 	return mouse_mode;
 }
 
-void DisplayServerWayland::mouse_set_mode_override(DisplayServerEnums::MouseMode p_mode) {
-	ERR_FAIL_INDEX(p_mode, DisplayServerEnums::MouseMode::MOUSE_MODE_MAX);
+void DisplayServerWayland::mouse_set_mode_override(MouseMode p_mode) {
+	ERR_FAIL_INDEX(p_mode, MouseMode::MOUSE_MODE_MAX);
 	if (p_mode == mouse_mode_override) {
 		return;
 	}
@@ -549,7 +501,7 @@ void DisplayServerWayland::mouse_set_mode_override(DisplayServerEnums::MouseMode
 	_mouse_update_mode();
 }
 
-DisplayServerEnums::MouseMode DisplayServerWayland::mouse_get_mode_override() const {
+DisplayServerWayland::MouseMode DisplayServerWayland::mouse_get_mode_override() const {
 	return mouse_mode_override;
 }
 
@@ -565,15 +517,34 @@ bool DisplayServerWayland::mouse_is_mode_override_enabled() const {
 	return mouse_mode_override_enabled;
 }
 
+// NOTE: This is hacked together (and not guaranteed to work in the first place)
+// as for some reason the there's no proper way to ask the compositor to warp
+// the pointer, although, at the time of writing, there's a proposal for a
+// proper protocol for this. See:
+// https://gitlab.freedesktop.org/wayland/wayland-protocols/-/issues/158
 void DisplayServerWayland::warp_mouse(const Point2i &p_to) {
 	MutexLock mutex_lock(wayland_thread.mutex);
-	wayland_thread.pointer_warp(p_to);
+
+	WaylandThread::PointerConstraint old_constraint = wayland_thread.pointer_get_constraint();
+
+	wayland_thread.pointer_set_constraint(WaylandThread::PointerConstraint::LOCKED);
+	wayland_thread.pointer_set_hint(p_to);
+
+	wayland_thread.pointer_set_constraint(old_constraint);
 }
 
 Point2i DisplayServerWayland::mouse_get_position() const {
 	MutexLock mutex_lock(wayland_thread.mutex);
 
-	return mouse_pos;
+	WindowID pointed_id = wayland_thread.pointer_get_pointed_window_id();
+
+	if (pointed_id != INVALID_WINDOW_ID && windows.has(pointed_id)) {
+		return Input::get_singleton()->get_mouse_position() + windows[pointed_id].rect.position;
+	}
+
+	// We can't properly implement this method by design.
+	// This is the best we can do unfortunately.
+	return Input::get_singleton()->get_mouse_position();
 }
 
 BitField<MouseButtonMask> DisplayServerWayland::mouse_get_button_state() const {
@@ -743,13 +714,13 @@ int DisplayServerWayland::screen_get_dpi(int p_screen) const {
 float DisplayServerWayland::screen_get_scale(int p_screen) const {
 	MutexLock mutex_lock(wayland_thread.mutex);
 
-	if (p_screen == DisplayServerEnums::SCREEN_OF_MAIN_WINDOW) {
+	if (p_screen == SCREEN_OF_MAIN_WINDOW) {
 		// Wayland does not expose fractional scale factors at the screen-level, but
 		// some code relies on it. Since this special screen is the default and a lot
 		// of code relies on it, we'll return the window's scale, which is what we
 		// really care about. After all, we have very little use of the actual screen
 		// enumeration APIs and we're (for now) in single-window mode anyways.
-		struct wl_surface *wl_surface = wayland_thread.window_get_wl_surface(DisplayServerEnums::MAIN_WINDOW_ID);
+		struct wl_surface *wl_surface = wayland_thread.window_get_wl_surface(MAIN_WINDOW_ID);
 		WaylandThread::WindowState *ws = wayland_thread.wl_surface_get_window_state(wl_surface);
 
 		return wayland_thread.window_state_get_scale_factor(ws);
@@ -772,12 +743,6 @@ float DisplayServerWayland::screen_get_refresh_rate(int p_screen) const {
 	return wayland_thread.screen_get_data(p_screen).refresh_rate;
 }
 
-bool DisplayServerWayland::is_touchscreen_available() const {
-	MutexLock mutex_lock(wayland_thread.mutex);
-
-	return wayland_thread.input_has_touch() || (Input::get_singleton() && Input::get_singleton()->is_emulating_touch_from_mouse());
-}
-
 void DisplayServerWayland::screen_set_keep_on(bool p_enable) {
 	MutexLock mutex_lock(wayland_thread.mutex);
 
@@ -787,14 +752,14 @@ void DisplayServerWayland::screen_set_keep_on(bool p_enable) {
 		return;
 	}
 
-	wayland_thread.window_set_idle_inhibition(DisplayServerEnums::MAIN_WINDOW_ID, p_enable);
+	wayland_thread.window_set_idle_inhibition(MAIN_WINDOW_ID, p_enable);
 
 #ifdef DBUS_ENABLED
 	if (portal_desktop && portal_desktop->is_inhibit_supported()) {
 		if (p_enable) {
 			// Attach the inhibit request to the main window, not the last focused window,
 			// on the basis that inhibiting the screensaver is global state for the application.
-			DisplayServerEnums::WindowID window_id = DisplayServerEnums::MAIN_WINDOW_ID;
+			WindowID window_id = MAIN_WINDOW_ID;
 			WaylandThread::WindowState *ws = wayland_thread.wl_surface_get_window_state(wayland_thread.window_get_wl_surface(window_id));
 			screensaver_inhibited = portal_desktop->inhibit(ws ? ws->exported_handle : String());
 		} else {
@@ -816,24 +781,24 @@ void DisplayServerWayland::screen_set_keep_on(bool p_enable) {
 bool DisplayServerWayland::screen_is_kept_on() const {
 	// FIXME: Multiwindow support.
 #ifdef DBUS_ENABLED
-	return wayland_thread.window_get_idle_inhibition(DisplayServerEnums::MAIN_WINDOW_ID) || screensaver_inhibited;
+	return wayland_thread.window_get_idle_inhibition(MAIN_WINDOW_ID) || screensaver_inhibited;
 #else
-	return wayland_thread.window_get_idle_inhibition(DisplayServerEnums::MAIN_WINDOW_ID);
+	return wayland_thread.window_get_idle_inhibition(MAIN_WINDOW_ID);
 #endif
 }
 
-Vector<DisplayServerEnums::WindowID> DisplayServerWayland::get_window_list() const {
+Vector<DisplayServer::WindowID> DisplayServerWayland::get_window_list() const {
 	MutexLock mutex_lock(wayland_thread.mutex);
 
 	Vector<int> ret;
-	for (const KeyValue<DisplayServerEnums::WindowID, WindowData> &E : windows) {
+	for (const KeyValue<WindowID, WindowData> &E : windows) {
 		ret.push_back(E.key);
 	}
 	return ret;
 }
 
-DisplayServerEnums::WindowID DisplayServerWayland::create_sub_window(DisplayServerEnums::WindowMode p_mode, DisplayServerEnums::VSyncMode p_vsync_mode, uint32_t p_flags, const Rect2i &p_rect, bool p_exclusive, DisplayServerEnums::WindowID p_transient_parent) {
-	DisplayServerEnums::WindowID id = ++window_id_counter;
+DisplayServer::WindowID DisplayServerWayland::create_sub_window(WindowMode p_mode, VSyncMode p_vsync_mode, uint32_t p_flags, const Rect2i &p_rect, bool p_exclusive, WindowID p_transient_parent) {
+	WindowID id = ++window_id_counter;
 	WindowData &wd = windows[id];
 
 	wd.id = id;
@@ -841,11 +806,15 @@ DisplayServerEnums::WindowID DisplayServerWayland::create_sub_window(DisplayServ
 	wd.flags = p_flags;
 	wd.vsync_mode = p_vsync_mode;
 
-	if (!AccessibilityServer::get_singleton()->window_create(wd.id, nullptr)) {
+#ifdef ACCESSKIT_ENABLED
+	if (accessibility_driver && !accessibility_driver->window_create(wd.id, nullptr)) {
 		if (OS::get_singleton()->is_stdout_verbose()) {
 			ERR_PRINT("Can't create an accessibility adapter for window, accessibility support disabled!");
 		}
+		memdelete(accessibility_driver);
+		accessibility_driver = nullptr;
 	}
+#endif
 
 	// NOTE: Remember to clear its position if this window will be a toplevel. We
 	// can only know once we show it.
@@ -856,7 +825,7 @@ DisplayServerEnums::WindowID DisplayServerWayland::create_sub_window(DisplayServ
 	return id;
 }
 
-void DisplayServerWayland::show_window(DisplayServerEnums::WindowID p_window_id) {
+void DisplayServerWayland::show_window(WindowID p_window_id) {
 	MutexLock mutex_lock(wayland_thread.mutex);
 
 	ERR_FAIL_COND(!windows.has(p_window_id));
@@ -868,19 +837,19 @@ void DisplayServerWayland::show_window(DisplayServerEnums::WindowID p_window_id)
 		// Showing this window will reset its mode with whatever the compositor
 		// reports. We'll save the mode beforehand so that we can reapply it later.
 		// TODO: Fix/Port/Move/Whatever to `WaylandThread` APIs.
-		DisplayServerEnums::WindowMode setup_mode = wd.mode;
+		WindowMode setup_mode = wd.mode;
 
 		// Let's determine the closest toplevel. For toplevels it will be themselves,
 		// for popups the first toplevel ancestor it finds.
-		DisplayServerEnums::WindowID root_id = wd.id;
-		while (root_id != DisplayServerEnums::INVALID_WINDOW_ID && window_get_flag(DisplayServerEnums::WINDOW_FLAG_POPUP_WM_HINT, root_id)) {
+		WindowID root_id = wd.id;
+		while (root_id != INVALID_WINDOW_ID && window_get_flag(WINDOW_FLAG_POPUP_WM_HINT, root_id)) {
 			root_id = windows[root_id].parent_id;
 		}
-		ERR_FAIL_COND(root_id == DisplayServerEnums::INVALID_WINDOW_ID);
+		ERR_FAIL_COND(root_id == INVALID_WINDOW_ID);
 
 		wd.root_id = root_id;
 
-		if (!window_get_flag(DisplayServerEnums::WINDOW_FLAG_POPUP_WM_HINT, p_window_id)) {
+		if (!window_get_flag(WINDOW_FLAG_POPUP_WM_HINT, p_window_id)) {
 			// NOTE: DO **NOT** KEEP THE POSITION SET FOR TOPLEVELS. Wayland does not
 			// track them and we're gonna get our events transformed in unexpected ways.
 			wd.rect.position = Point2i();
@@ -890,7 +859,7 @@ void DisplayServerWayland::show_window(DisplayServerEnums::WindowID p_window_id)
 			wayland_thread.window_set_min_size(p_window_id, wd.min_size);
 			wayland_thread.window_set_max_size(p_window_id, wd.max_size);
 			wayland_thread.window_set_app_id(p_window_id, _get_app_id_from_context(context));
-			wayland_thread.window_set_borderless(p_window_id, window_get_flag(DisplayServerEnums::WINDOW_FLAG_BORDERLESS, p_window_id));
+			wayland_thread.window_set_borderless(p_window_id, window_get_flag(WINDOW_FLAG_BORDERLESS, p_window_id));
 
 			// Since it can't have a position. Let's tell the window node the news by
 			// sending the actual rect to it.
@@ -902,7 +871,7 @@ void DisplayServerWayland::show_window(DisplayServerEnums::WindowID p_window_id)
 
 			windows[root_id].popup_stack.push_back(p_window_id);
 
-			if (window_get_flag(DisplayServerEnums::WINDOW_FLAG_POPUP, p_window_id)) {
+			if (window_get_flag(WINDOW_FLAG_POPUP, p_window_id)) {
 				// Reroutes all input to it.
 				popup_menu_list.push_back(p_window_id);
 			}
@@ -915,7 +884,7 @@ void DisplayServerWayland::show_window(DisplayServerEnums::WindowID p_window_id)
 		bool ready = wayland_thread.window_wait_ready(p_window_id, WINDOW_READY_TIMEOUT_MS);
 		if (!ready) {
 			ERR_PRINT(vformat("Could not create window %d: timeout.", p_window_id));
-			_send_window_event(DisplayServerEnums::WINDOW_EVENT_FORCE_CLOSE, p_window_id);
+			_send_window_event(WINDOW_EVENT_FORCE_CLOSE, p_window_id);
 
 			return;
 		}
@@ -930,22 +899,12 @@ void DisplayServerWayland::show_window(DisplayServerEnums::WindowID p_window_id)
 #ifdef VULKAN_ENABLED
 				RenderingContextDriverVulkanWayland::WindowPlatformData vulkan;
 #endif
-#ifdef WEBGPU_ENABLED
-				RenderingContextDriverWebGPUWayland::WindowPlatformData webgpu;
-#endif
 			} wpd;
 #ifdef VULKAN_ENABLED
 			if (rendering_driver == "vulkan") {
 				wpd.vulkan.surface = wayland_thread.window_get_wl_surface(wd.id);
 				ERR_FAIL_NULL(wpd.vulkan.surface);
 				wpd.vulkan.display = wayland_thread.get_wl_display();
-			}
-#endif
-#ifdef WEBGPU_ENABLED
-			if (rendering_driver == "webgpu") {
-				wpd.webgpu.surface = wayland_thread.window_get_wl_surface(wd.id);
-				ERR_FAIL_NULL(wpd.webgpu.surface);
-				wpd.webgpu.display = wayland_thread.get_wl_display();
 			}
 #endif
 			Error err = rendering_context->window_create(wd.id, &wpd);
@@ -988,25 +947,25 @@ void DisplayServerWayland::show_window(DisplayServerEnums::WindowID p_window_id)
 	}
 }
 
-void DisplayServerWayland::delete_sub_window(DisplayServerEnums::WindowID p_window_id) {
+void DisplayServerWayland::delete_sub_window(WindowID p_window_id) {
 	MutexLock mutex_lock(wayland_thread.mutex);
 
-	ERR_FAIL_COND_MSG(p_window_id == DisplayServerEnums::MAIN_WINDOW_ID, "Main window can't be deleted");
+	ERR_FAIL_COND_MSG(p_window_id == MAIN_WINDOW_ID, "Main window can't be deleted");
 
 	_delete_window(p_window_id);
 }
 
-DisplayServerEnums::WindowID DisplayServerWayland::window_get_active_popup() const {
+DisplayServer::WindowID DisplayServerWayland::window_get_active_popup() const {
 	MutexLock mutex_lock(wayland_thread.mutex);
 
 	if (!popup_menu_list.is_empty()) {
 		return popup_menu_list.back()->get();
 	}
 
-	return DisplayServerEnums::INVALID_WINDOW_ID;
+	return INVALID_WINDOW_ID;
 }
 
-void DisplayServerWayland::window_set_popup_safe_rect(DisplayServerEnums::WindowID p_window, const Rect2i &p_rect) {
+void DisplayServerWayland::window_set_popup_safe_rect(WindowID p_window, const Rect2i &p_rect) {
 	MutexLock mutex_lock(wayland_thread.mutex);
 
 	ERR_FAIL_COND(!windows.has(p_window));
@@ -1014,7 +973,7 @@ void DisplayServerWayland::window_set_popup_safe_rect(DisplayServerEnums::Window
 	windows[p_window].safe_rect = p_rect;
 }
 
-Rect2i DisplayServerWayland::window_get_popup_safe_rect(DisplayServerEnums::WindowID p_window) const {
+Rect2i DisplayServerWayland::window_get_popup_safe_rect(WindowID p_window) const {
 	MutexLock mutex_lock(wayland_thread.mutex);
 
 	ERR_FAIL_COND_V(!windows.has(p_window), Rect2i());
@@ -1022,36 +981,36 @@ Rect2i DisplayServerWayland::window_get_popup_safe_rect(DisplayServerEnums::Wind
 	return windows[p_window].safe_rect;
 }
 
-int64_t DisplayServerWayland::window_get_native_handle(DisplayServerEnums::HandleType p_handle_type, DisplayServerEnums::WindowID p_window) const {
+int64_t DisplayServerWayland::window_get_native_handle(HandleType p_handle_type, WindowID p_window) const {
 	MutexLock mutex_lock(wayland_thread.mutex);
 
 	switch (p_handle_type) {
-		case DisplayServerEnums::DISPLAY_HANDLE: {
+		case DISPLAY_HANDLE: {
 			return (int64_t)wayland_thread.get_wl_display();
 		} break;
 
-		case DisplayServerEnums::WINDOW_HANDLE: {
+		case WINDOW_HANDLE: {
 			return (int64_t)wayland_thread.window_get_wl_surface(p_window);
 		} break;
 
-		case DisplayServerEnums::WINDOW_VIEW: {
+		case WINDOW_VIEW: {
 			return 0; // Not supported.
 		} break;
 
 #ifdef GLES3_ENABLED
-		case DisplayServerEnums::OPENGL_CONTEXT: {
+		case OPENGL_CONTEXT: {
 			if (egl_manager) {
 				return (int64_t)egl_manager->get_context(p_window);
 			}
 			return 0;
 		} break;
-		case DisplayServerEnums::EGL_DISPLAY: {
+		case EGL_DISPLAY: {
 			if (egl_manager) {
 				return (int64_t)egl_manager->get_display(p_window);
 			}
 			return 0;
 		}
-		case DisplayServerEnums::EGL_CONFIG: {
+		case EGL_CONFIG: {
 			if (egl_manager) {
 				return (int64_t)egl_manager->get_config(p_window);
 			}
@@ -1065,12 +1024,12 @@ int64_t DisplayServerWayland::window_get_native_handle(DisplayServerEnums::Handl
 	}
 }
 
-DisplayServerEnums::WindowID DisplayServerWayland::get_window_at_screen_position(const Point2i &p_position) const {
+DisplayServer::WindowID DisplayServerWayland::get_window_at_screen_position(const Point2i &p_position) const {
 	// Standard Wayland APIs don't support this.
-	return DisplayServerEnums::MAIN_WINDOW_ID;
+	return MAIN_WINDOW_ID;
 }
 
-void DisplayServerWayland::window_attach_instance_id(ObjectID p_instance, DisplayServerEnums::WindowID p_window_id) {
+void DisplayServerWayland::window_attach_instance_id(ObjectID p_instance, WindowID p_window_id) {
 	MutexLock mutex_lock(wayland_thread.mutex);
 
 	ERR_FAIL_COND(!windows.has(p_window_id));
@@ -1078,7 +1037,7 @@ void DisplayServerWayland::window_attach_instance_id(ObjectID p_instance, Displa
 	windows[p_window_id].instance_id = p_instance;
 }
 
-ObjectID DisplayServerWayland::window_get_attached_instance_id(DisplayServerEnums::WindowID p_window_id) const {
+ObjectID DisplayServerWayland::window_get_attached_instance_id(WindowID p_window_id) const {
 	MutexLock mutex_lock(wayland_thread.mutex);
 
 	ERR_FAIL_COND_V(!windows.has(p_window_id), ObjectID());
@@ -1086,7 +1045,7 @@ ObjectID DisplayServerWayland::window_get_attached_instance_id(DisplayServerEnum
 	return windows[p_window_id].instance_id;
 }
 
-void DisplayServerWayland::window_set_title(const String &p_title, DisplayServerEnums::WindowID p_window_id) {
+void DisplayServerWayland::window_set_title(const String &p_title, DisplayServer::WindowID p_window_id) {
 	MutexLock mutex_lock(wayland_thread.mutex);
 
 	ERR_FAIL_COND(!windows.has(p_window_id));
@@ -1100,12 +1059,12 @@ void DisplayServerWayland::window_set_title(const String &p_title, DisplayServer
 	}
 }
 
-void DisplayServerWayland::window_set_mouse_passthrough(const Vector<Vector2> &p_region, DisplayServerEnums::WindowID p_window_id) {
+void DisplayServerWayland::window_set_mouse_passthrough(const Vector<Vector2> &p_region, DisplayServer::WindowID p_window_id) {
 	// TODO
 	DEBUG_LOG_WAYLAND(vformat("wayland stub window_set_mouse_passthrough region %s", p_region));
 }
 
-void DisplayServerWayland::window_set_rect_changed_callback(const Callable &p_callable, DisplayServerEnums::WindowID p_window_id) {
+void DisplayServerWayland::window_set_rect_changed_callback(const Callable &p_callable, DisplayServer::WindowID p_window_id) {
 	MutexLock mutex_lock(wayland_thread.mutex);
 
 	ERR_FAIL_COND(!windows.has(p_window_id));
@@ -1113,7 +1072,7 @@ void DisplayServerWayland::window_set_rect_changed_callback(const Callable &p_ca
 	windows[p_window_id].rect_changed_callback = p_callable;
 }
 
-void DisplayServerWayland::window_set_window_event_callback(const Callable &p_callable, DisplayServerEnums::WindowID p_window_id) {
+void DisplayServerWayland::window_set_window_event_callback(const Callable &p_callable, DisplayServer::WindowID p_window_id) {
 	MutexLock mutex_lock(wayland_thread.mutex);
 
 	ERR_FAIL_COND(!windows.has(p_window_id));
@@ -1121,7 +1080,7 @@ void DisplayServerWayland::window_set_window_event_callback(const Callable &p_ca
 	windows[p_window_id].window_event_callback = p_callable;
 }
 
-void DisplayServerWayland::window_set_input_event_callback(const Callable &p_callable, DisplayServerEnums::WindowID p_window_id) {
+void DisplayServerWayland::window_set_input_event_callback(const Callable &p_callable, DisplayServer::WindowID p_window_id) {
 	MutexLock mutex_lock(wayland_thread.mutex);
 
 	ERR_FAIL_COND(!windows.has(p_window_id));
@@ -1129,7 +1088,7 @@ void DisplayServerWayland::window_set_input_event_callback(const Callable &p_cal
 	windows[p_window_id].input_event_callback = p_callable;
 }
 
-void DisplayServerWayland::window_set_input_text_callback(const Callable &p_callable, DisplayServerEnums::WindowID p_window_id) {
+void DisplayServerWayland::window_set_input_text_callback(const Callable &p_callable, WindowID p_window_id) {
 	MutexLock mutex_lock(wayland_thread.mutex);
 
 	ERR_FAIL_COND(!windows.has(p_window_id));
@@ -1137,7 +1096,7 @@ void DisplayServerWayland::window_set_input_text_callback(const Callable &p_call
 	windows[p_window_id].input_text_callback = p_callable;
 }
 
-void DisplayServerWayland::window_set_drop_files_callback(const Callable &p_callable, DisplayServerEnums::WindowID p_window_id) {
+void DisplayServerWayland::window_set_drop_files_callback(const Callable &p_callable, DisplayServer::WindowID p_window_id) {
 	MutexLock mutex_lock(wayland_thread.mutex);
 
 	ERR_FAIL_COND(!windows.has(p_window_id));
@@ -1145,33 +1104,33 @@ void DisplayServerWayland::window_set_drop_files_callback(const Callable &p_call
 	windows[p_window_id].drop_files_callback = p_callable;
 }
 
-int DisplayServerWayland::window_get_current_screen(DisplayServerEnums::WindowID p_window_id) const {
-	ERR_FAIL_COND_V(!windows.has(p_window_id), DisplayServerEnums::INVALID_SCREEN);
+int DisplayServerWayland::window_get_current_screen(DisplayServer::WindowID p_window_id) const {
+	ERR_FAIL_COND_V(!windows.has(p_window_id), INVALID_SCREEN);
 	// Standard Wayland APIs don't support getting the screen of a window.
 	return 0;
 }
 
-void DisplayServerWayland::window_set_current_screen(int p_screen, DisplayServerEnums::WindowID p_window_id) {
+void DisplayServerWayland::window_set_current_screen(int p_screen, DisplayServer::WindowID p_window_id) {
 	// Standard Wayland APIs don't support setting the screen of a window.
 }
 
-Point2i DisplayServerWayland::window_get_position(DisplayServerEnums::WindowID p_window_id) const {
+Point2i DisplayServerWayland::window_get_position(DisplayServer::WindowID p_window_id) const {
 	MutexLock mutex_lock(wayland_thread.mutex);
 
 	return windows[p_window_id].rect.position;
 }
 
-Point2i DisplayServerWayland::window_get_position_with_decorations(DisplayServerEnums::WindowID p_window_id) const {
+Point2i DisplayServerWayland::window_get_position_with_decorations(DisplayServer::WindowID p_window_id) const {
 	MutexLock mutex_lock(wayland_thread.mutex);
 
 	return windows[p_window_id].rect.position;
 }
 
-void DisplayServerWayland::window_set_position(const Point2i &p_position, DisplayServerEnums::WindowID p_window_id) {
+void DisplayServerWayland::window_set_position(const Point2i &p_position, DisplayServer::WindowID p_window_id) {
 	// Unsupported with toplevels.
 }
 
-void DisplayServerWayland::window_set_max_size(const Size2i p_size, DisplayServerEnums::WindowID p_window_id) {
+void DisplayServerWayland::window_set_max_size(const Size2i p_size, DisplayServer::WindowID p_window_id) {
 	MutexLock mutex_lock(wayland_thread.mutex);
 
 	DEBUG_LOG_WAYLAND(vformat("window max size set to %s", p_size));
@@ -1196,14 +1155,14 @@ void DisplayServerWayland::window_set_max_size(const Size2i p_size, DisplayServe
 	}
 }
 
-Size2i DisplayServerWayland::window_get_max_size(DisplayServerEnums::WindowID p_window_id) const {
+Size2i DisplayServerWayland::window_get_max_size(DisplayServer::WindowID p_window_id) const {
 	MutexLock mutex_lock(wayland_thread.mutex);
 
 	ERR_FAIL_COND_V(!windows.has(p_window_id), Size2i());
 	return windows[p_window_id].max_size;
 }
 
-void DisplayServerWayland::gl_window_make_current(DisplayServerEnums::WindowID p_window_id) {
+void DisplayServerWayland::gl_window_make_current(DisplayServer::WindowID p_window_id) {
 #ifdef GLES3_ENABLED
 	if (egl_manager) {
 		egl_manager->window_make_current(p_window_id);
@@ -1211,7 +1170,7 @@ void DisplayServerWayland::gl_window_make_current(DisplayServerEnums::WindowID p
 #endif
 }
 
-void DisplayServerWayland::window_set_transient(DisplayServerEnums::WindowID p_window_id, DisplayServerEnums::WindowID p_parent) {
+void DisplayServerWayland::window_set_transient(WindowID p_window_id, WindowID p_parent) {
 	MutexLock mutex_lock(wayland_thread.mutex);
 
 	ERR_FAIL_COND(!windows.has(p_window_id));
@@ -1219,9 +1178,9 @@ void DisplayServerWayland::window_set_transient(DisplayServerEnums::WindowID p_w
 
 	ERR_FAIL_COND(wd.parent_id == p_parent);
 
-	if (p_parent != DisplayServerEnums::INVALID_WINDOW_ID) {
+	if (p_parent != INVALID_WINDOW_ID) {
 		ERR_FAIL_COND(!windows.has(p_parent));
-		ERR_FAIL_COND_MSG(wd.parent_id != DisplayServerEnums::INVALID_WINDOW_ID, "Window already has a transient parent");
+		ERR_FAIL_COND_MSG(wd.parent_id != INVALID_WINDOW_ID, "Window already has a transient parent");
 		wd.parent_id = p_parent;
 
 		// NOTE: Looks like live unparenting is not really practical unfortunately.
@@ -1232,7 +1191,7 @@ void DisplayServerWayland::window_set_transient(DisplayServerEnums::WindowID p_w
 	}
 }
 
-void DisplayServerWayland::window_set_min_size(const Size2i p_size, DisplayServerEnums::WindowID p_window_id) {
+void DisplayServerWayland::window_set_min_size(const Size2i p_size, DisplayServer::WindowID p_window_id) {
 	MutexLock mutex_lock(wayland_thread.mutex);
 
 	DEBUG_LOG_WAYLAND(vformat("window minsize set to %s", p_size));
@@ -1257,14 +1216,14 @@ void DisplayServerWayland::window_set_min_size(const Size2i p_size, DisplayServe
 	}
 }
 
-Size2i DisplayServerWayland::window_get_min_size(DisplayServerEnums::WindowID p_window_id) const {
+Size2i DisplayServerWayland::window_get_min_size(DisplayServer::WindowID p_window_id) const {
 	MutexLock mutex_lock(wayland_thread.mutex);
 
 	ERR_FAIL_COND_V(!windows.has(p_window_id), Size2i());
 	return windows[p_window_id].min_size;
 }
 
-void DisplayServerWayland::window_set_size(const Size2i p_size, DisplayServerEnums::WindowID p_window_id) {
+void DisplayServerWayland::window_set_size(const Size2i p_size, DisplayServer::WindowID p_window_id) {
 	MutexLock mutex_lock(wayland_thread.mutex);
 
 	ERR_FAIL_COND(!windows.has(p_window_id));
@@ -1284,14 +1243,14 @@ void DisplayServerWayland::window_set_size(const Size2i p_size, DisplayServerEnu
 	_update_window_rect(Rect2i(wd.rect.position, new_size), p_window_id);
 }
 
-Size2i DisplayServerWayland::window_get_size(DisplayServerEnums::WindowID p_window_id) const {
+Size2i DisplayServerWayland::window_get_size(DisplayServer::WindowID p_window_id) const {
 	MutexLock mutex_lock(wayland_thread.mutex);
 
 	ERR_FAIL_COND_V(!windows.has(p_window_id), Size2i());
 	return windows[p_window_id].rect.size;
 }
 
-Size2i DisplayServerWayland::window_get_size_with_decorations(DisplayServerEnums::WindowID p_window_id) const {
+Size2i DisplayServerWayland::window_get_size_with_decorations(DisplayServer::WindowID p_window_id) const {
 	MutexLock mutex_lock(wayland_thread.mutex);
 
 	// I don't think there's a way of actually knowing the size of the window
@@ -1301,7 +1260,7 @@ Size2i DisplayServerWayland::window_get_size_with_decorations(DisplayServerEnums
 	return windows[p_window_id].rect.size;
 }
 
-float DisplayServerWayland::window_get_scale(DisplayServerEnums::WindowID p_window_id) const {
+float DisplayServerWayland::window_get_scale(WindowID p_window_id) const {
 	MutexLock mutex_lock(wayland_thread.mutex);
 
 	const WaylandThread::WindowState *ws = wayland_thread.window_get_state(p_window_id);
@@ -1310,7 +1269,7 @@ float DisplayServerWayland::window_get_scale(DisplayServerEnums::WindowID p_wind
 	return wayland_thread.window_state_get_scale_factor(ws);
 }
 
-void DisplayServerWayland::window_set_mode(DisplayServerEnums::WindowMode p_mode, DisplayServerEnums::WindowID p_window_id) {
+void DisplayServerWayland::window_set_mode(WindowMode p_mode, DisplayServer::WindowID p_window_id) {
 	MutexLock mutex_lock(wayland_thread.mutex);
 
 	ERR_FAIL_COND(!windows.has(p_window_id));
@@ -1323,33 +1282,26 @@ void DisplayServerWayland::window_set_mode(DisplayServerEnums::WindowMode p_mode
 	wayland_thread.window_try_set_mode(p_window_id, p_mode);
 }
 
-void DisplayServerWayland::window_set_icon(const Ref<Image> &p_icon, DisplayServerEnums::WindowID p_window_id) {
+DisplayServer::WindowMode DisplayServerWayland::window_get_mode(DisplayServer::WindowID p_window_id) const {
 	MutexLock mutex_lock(wayland_thread.mutex);
 
-	ERR_FAIL_COND(!windows.has(p_window_id));
-	wayland_thread.set_icon(p_icon, p_window_id);
-}
-
-DisplayServerEnums::WindowMode DisplayServerWayland::window_get_mode(DisplayServerEnums::WindowID p_window_id) const {
-	MutexLock mutex_lock(wayland_thread.mutex);
-
-	ERR_FAIL_COND_V(!windows.has(p_window_id), DisplayServerEnums::WINDOW_MODE_WINDOWED);
+	ERR_FAIL_COND_V(!windows.has(p_window_id), WINDOW_MODE_WINDOWED);
 	const WindowData &wd = windows[p_window_id];
 
 	if (!wd.created) {
-		return DisplayServerEnums::WINDOW_MODE_WINDOWED;
+		return WINDOW_MODE_WINDOWED;
 	}
 
 	return wayland_thread.window_get_mode(p_window_id);
 }
 
-bool DisplayServerWayland::window_is_maximize_allowed(DisplayServerEnums::WindowID p_window_id) const {
+bool DisplayServerWayland::window_is_maximize_allowed(DisplayServer::WindowID p_window_id) const {
 	MutexLock mutex_lock(wayland_thread.mutex);
 
-	return wayland_thread.window_can_set_mode(p_window_id, DisplayServerEnums::WINDOW_MODE_MAXIMIZED);
+	return wayland_thread.window_can_set_mode(p_window_id, WINDOW_MODE_MAXIMIZED);
 }
 
-void DisplayServerWayland::window_set_flag(DisplayServerEnums::WindowFlags p_flag, bool p_enabled, DisplayServerEnums::WindowID p_window_id) {
+void DisplayServerWayland::window_set_flag(WindowFlags p_flag, bool p_enabled, DisplayServer::WindowID p_window_id) {
 	MutexLock mutex_lock(wayland_thread.mutex);
 
 	ERR_FAIL_COND(!windows.has(p_window_id));
@@ -1358,18 +1310,18 @@ void DisplayServerWayland::window_set_flag(DisplayServerEnums::WindowFlags p_fla
 	DEBUG_LOG_WAYLAND(vformat("Window set flag %d", p_flag));
 
 	switch (p_flag) {
-		case DisplayServerEnums::WINDOW_FLAG_BORDERLESS: {
+		case WINDOW_FLAG_BORDERLESS: {
 			wayland_thread.window_set_borderless(p_window_id, p_enabled);
 		} break;
 
-		case DisplayServerEnums::WINDOW_FLAG_POPUP: {
-			ERR_FAIL_COND_MSG(p_window_id == DisplayServerEnums::MAIN_WINDOW_ID, "Main window can't be popup.");
-			ERR_FAIL_COND_MSG(wd.created && (wd.flags & DisplayServerEnums::WINDOW_FLAG_POPUP_BIT) != p_enabled, "Popup flag can't changed while window is opened.");
+		case WINDOW_FLAG_POPUP: {
+			ERR_FAIL_COND_MSG(p_window_id == MAIN_WINDOW_ID, "Main window can't be popup.");
+			ERR_FAIL_COND_MSG(wd.created && (wd.flags & WINDOW_FLAG_POPUP_BIT) != p_enabled, "Popup flag can't changed while window is opened.");
 		} break;
 
-		case DisplayServerEnums::WINDOW_FLAG_POPUP_WM_HINT: {
-			ERR_FAIL_COND_MSG(p_window_id == DisplayServerEnums::MAIN_WINDOW_ID, "Main window can't have popup hint.");
-			ERR_FAIL_COND_MSG(wd.created && (wd.flags & DisplayServerEnums::WINDOW_FLAG_POPUP_WM_HINT_BIT) != p_enabled, "Popup hint can't changed while window is opened.");
+		case WINDOW_FLAG_POPUP_WM_HINT: {
+			ERR_FAIL_COND_MSG(p_window_id == MAIN_WINDOW_ID, "Main window can't have popup hint.");
+			ERR_FAIL_COND_MSG(wd.created && (wd.flags & WINDOW_FLAG_POPUP_WM_HINT_BIT) != p_enabled, "Popup hint can't changed while window is opened.");
 		} break;
 
 		default: {
@@ -1383,14 +1335,14 @@ void DisplayServerWayland::window_set_flag(DisplayServerEnums::WindowFlags p_fla
 	}
 }
 
-bool DisplayServerWayland::window_get_flag(DisplayServerEnums::WindowFlags p_flag, DisplayServerEnums::WindowID p_window_id) const {
+bool DisplayServerWayland::window_get_flag(WindowFlags p_flag, DisplayServer::WindowID p_window_id) const {
 	MutexLock mutex_lock(wayland_thread.mutex);
 
 	ERR_FAIL_COND_V(!windows.has(p_window_id), false);
 	return windows[p_window_id].flags & (1 << p_flag);
 }
 
-void DisplayServerWayland::window_request_attention(DisplayServerEnums::WindowID p_window_id) {
+void DisplayServerWayland::window_request_attention(DisplayServer::WindowID p_window_id) {
 	MutexLock mutex_lock(wayland_thread.mutex);
 
 	DEBUG_LOG_WAYLAND("Requested attention.");
@@ -1398,17 +1350,17 @@ void DisplayServerWayland::window_request_attention(DisplayServerEnums::WindowID
 	wayland_thread.window_request_attention(p_window_id);
 }
 
-void DisplayServerWayland::window_move_to_foreground(DisplayServerEnums::WindowID p_window_id) {
+void DisplayServerWayland::window_move_to_foreground(DisplayServer::WindowID p_window_id) {
 	// Standard Wayland APIs don't support this.
 }
 
-bool DisplayServerWayland::window_is_focused(DisplayServerEnums::WindowID p_window_id) const {
+bool DisplayServerWayland::window_is_focused(WindowID p_window_id) const {
 	MutexLock mutex_lock(wayland_thread.mutex);
 
 	return wayland_thread.pointer_get_pointed_window_id() == p_window_id;
 }
 
-bool DisplayServerWayland::window_can_draw(DisplayServerEnums::WindowID p_window_id) const {
+bool DisplayServerWayland::window_can_draw(DisplayServer::WindowID p_window_id) const {
 	MutexLock mutex_lock(wayland_thread.mutex);
 
 	uint64_t last_frame_time = wayland_thread.window_get_last_frame_time(p_window_id);
@@ -1429,13 +1381,13 @@ bool DisplayServerWayland::can_any_window_draw() const {
 	return suspend_state == SuspendState::NONE;
 }
 
-void DisplayServerWayland::window_set_ime_active(const bool p_active, DisplayServerEnums::WindowID p_window_id) {
+void DisplayServerWayland::window_set_ime_active(const bool p_active, DisplayServer::WindowID p_window_id) {
 	MutexLock mutex_lock(wayland_thread.mutex);
 
 	wayland_thread.window_set_ime_active(p_active, p_window_id);
 }
 
-void DisplayServerWayland::window_set_ime_position(const Point2i &p_pos, DisplayServerEnums::WindowID p_window_id) {
+void DisplayServerWayland::window_set_ime_position(const Point2i &p_pos, DisplayServer::WindowID p_window_id) {
 	MutexLock mutex_lock(wayland_thread.mutex);
 
 	wayland_thread.window_set_ime_position(p_pos, p_window_id);
@@ -1472,7 +1424,7 @@ String DisplayServerWayland::ime_get_text() const {
 // 1.30 added a protocol for allowing async flips which is supposed to be
 // handled by drivers such as Vulkan. We can then just ask to disable v-sync and
 // hope for the best. See: https://gitlab.freedesktop.org/wayland/wayland-protocols/-/commit/6394f0b4f3be151076f10a845a2fb131eeb56706
-void DisplayServerWayland::window_set_vsync_mode(DisplayServerEnums::VSyncMode p_vsync_mode, DisplayServerEnums::WindowID p_window_id) {
+void DisplayServerWayland::window_set_vsync_mode(DisplayServer::VSyncMode p_vsync_mode, DisplayServer::WindowID p_window_id) {
 	MutexLock mutex_lock(wayland_thread.mutex);
 
 	WindowData &wd = windows[p_window_id];
@@ -1481,18 +1433,18 @@ void DisplayServerWayland::window_set_vsync_mode(DisplayServerEnums::VSyncMode p
 	if (rendering_context) {
 		rendering_context->window_set_vsync_mode(p_window_id, p_vsync_mode);
 
-		wd.emulate_vsync = (!wayland_thread.is_fifo_available() && rendering_context->window_get_vsync_mode(p_window_id) == DisplayServerEnums::VSYNC_ENABLED);
+		wd.emulate_vsync = (!wayland_thread.is_fifo_available() && rendering_context->window_get_vsync_mode(p_window_id) == DisplayServer::VSYNC_ENABLED);
 
 		if (wd.emulate_vsync) {
 			print_verbose("VSYNC: manually throttling frames using MAILBOX.");
-			rendering_context->window_set_vsync_mode(p_window_id, DisplayServerEnums::VSYNC_MAILBOX);
+			rendering_context->window_set_vsync_mode(p_window_id, DisplayServer::VSYNC_MAILBOX);
 		}
 	}
 #endif // VULKAN_ENABLED
 
 #ifdef GLES3_ENABLED
 	if (egl_manager) {
-		egl_manager->set_use_vsync(p_vsync_mode != DisplayServerEnums::VSYNC_DISABLED);
+		egl_manager->set_use_vsync(p_vsync_mode != DisplayServer::VSYNC_DISABLED);
 
 		// NOTE: Mesa's EGL implementation does not seem to make use of fifo_v1 so
 		// we'll have to always emulate V-Sync.
@@ -1506,10 +1458,10 @@ void DisplayServerWayland::window_set_vsync_mode(DisplayServerEnums::VSyncMode p
 #endif // GLES3_ENABLED
 }
 
-DisplayServerEnums::VSyncMode DisplayServerWayland::window_get_vsync_mode(DisplayServerEnums::WindowID p_window_id) const {
+DisplayServer::VSyncMode DisplayServerWayland::window_get_vsync_mode(DisplayServer::WindowID p_window_id) const {
 	const WindowData &wd = windows[p_window_id];
 	if (wd.emulate_vsync) {
-		return DisplayServerEnums::VSYNC_ENABLED;
+		return DisplayServer::VSYNC_ENABLED;
 	}
 
 #ifdef VULKAN_ENABLED
@@ -1520,184 +1472,28 @@ DisplayServerEnums::VSyncMode DisplayServerWayland::window_get_vsync_mode(Displa
 
 #ifdef GLES3_ENABLED
 	if (egl_manager) {
-		return egl_manager->is_using_vsync() ? DisplayServerEnums::VSYNC_ENABLED : DisplayServerEnums::VSYNC_DISABLED;
+		return egl_manager->is_using_vsync() ? DisplayServer::VSYNC_ENABLED : DisplayServer::VSYNC_DISABLED;
 	}
 #endif // GLES3_ENABLED
 
-	return DisplayServerEnums::VSYNC_ENABLED;
+	return DisplayServer::VSYNC_ENABLED;
 }
 
-void DisplayServerWayland::window_start_drag(DisplayServerEnums::WindowID p_window) {
+void DisplayServerWayland::window_start_drag(WindowID p_window) {
 	MutexLock mutex_lock(wayland_thread.mutex);
 
 	wayland_thread.window_start_drag(p_window);
 }
 
-void DisplayServerWayland::window_start_resize(DisplayServerEnums::WindowResizeEdge p_edge, DisplayServerEnums::WindowID p_window) {
+void DisplayServerWayland::window_start_resize(WindowResizeEdge p_edge, WindowID p_window) {
 	MutexLock mutex_lock(wayland_thread.mutex);
 
-	ERR_FAIL_INDEX(int(p_edge), DisplayServerEnums::WINDOW_EDGE_MAX);
+	ERR_FAIL_INDEX(int(p_edge), WINDOW_EDGE_MAX);
 	wayland_thread.window_start_resize(p_edge, p_window);
 }
 
-void DisplayServerWayland::_window_update_hdr_state(WindowData &p_window) {
-	DisplayServerEnums::WindowID window_id = p_window.id;
-
-#if defined(RD_ENABLED)
-	if (rendering_context) {
-		// The `display/window/hdr/request_hdr_output` project setting makes the main window "request" HDR.
-		// On Windows, this means enable HDR for the main window if it is on an HDR screen.
-		// Since all screens support HDR on Wayland, we use whether the window "prefers" HDR or not instead.
-		bool hdr_preferred = p_window.color_profile.target_max_luminance > p_window.color_profile.reference_luminance;
-		bool hdr_desired = wayland_thread.supports_hdr() && hdr_preferred && p_window.hdr_requested;
-
-		if (rendering_context->window_get_hdr_output_enabled(window_id) != hdr_desired) {
-			rendering_context->window_set_hdr_output_enabled(window_id, hdr_desired);
-			_send_window_event(DisplayServerEnums::WINDOW_EVENT_OUTPUT_MAX_LINEAR_VALUE_CHANGED, window_id);
-		}
-
-		if (hdr_desired) {
-			rendering_context->window_set_hdr_output_max_luminance(window_id, p_window.color_profile.target_max_luminance);
-			rendering_context->window_set_hdr_output_reference_luminance(window_id, p_window.color_profile.reference_luminance);
-			rendering_context->window_set_hdr_output_linear_luminance_scale(window_id, p_window.color_profile.target_max_luminance);
-
-			p_window.color_profile.named_primary = WP_COLOR_MANAGER_V1_PRIMARIES_SRGB;
-			p_window.color_profile.named_transfer_function = WP_COLOR_MANAGER_V1_TRANSFER_FUNCTION_EXT_LINEAR;
-		} else {
-			p_window.color_profile.named_primary = WP_COLOR_MANAGER_V1_PRIMARIES_SRGB;
-			p_window.color_profile.named_transfer_function = WP_COLOR_MANAGER_V1_TRANSFER_FUNCTION_GAMMA22;
-		}
-
-		if (p_window.visible) {
-			MutexLock mutex_lock(wayland_thread.mutex);
-			wayland_thread.window_set_color_profile(window_id, p_window.color_profile);
-		}
-	}
-#endif
-}
-
-bool DisplayServerWayland::window_is_hdr_output_supported(DisplayServerEnums::WindowID p_window_id) const {
-	ERR_FAIL_COND_V(!windows.has(p_window_id), false);
-	bool renderer_supports_hdr_output = false;
-	bool surface_supports_hdr_output = false;
-#if defined(RD_ENABLED)
-	if (rendering_device && rendering_device->has_feature(RenderingDevice::Features::SUPPORTS_HDR_OUTPUT)) {
-		renderer_supports_hdr_output = true;
-		surface_supports_hdr_output = rendering_device->screen_get_hdr_output_supported(p_window_id);
-	}
-#endif
-	if (!renderer_supports_hdr_output) {
-		return false;
-	}
-
-	if (!surface_supports_hdr_output) {
-		return false;
-	}
-
-	const WindowData &wd = windows[p_window_id];
-
-	return wd.color_profile.target_max_luminance > wd.color_profile.reference_luminance;
-}
-
-void DisplayServerWayland::window_request_hdr_output(const bool p_enabled, DisplayServerEnums::WindowID p_window_id) {
-	if (p_enabled) {
-		bool renderer_supports_hdr_output = false;
-		bool surface_supports_hdr_output = false;
-#if defined(RD_ENABLED)
-		if (rendering_device && rendering_device->has_feature(RenderingDevice::Features::SUPPORTS_HDR_OUTPUT)) {
-			renderer_supports_hdr_output = true;
-			surface_supports_hdr_output = rendering_device->screen_get_hdr_output_supported(p_window_id);
-		}
-#endif
-		if (!renderer_supports_hdr_output) {
-			WARN_PRINT("HDR output requested, but is not supported by the renderer or rendering device driver.");
-			return;
-		}
-
-		if (!surface_supports_hdr_output) {
-			WARN_PRINT("HDR output requested, but the window does not support an HDR format.");
-			return;
-		}
-	}
-
-	ERR_FAIL_COND(!windows.has(p_window_id));
-	WindowData &wd = windows[p_window_id];
-	wd.hdr_requested = p_enabled;
-
-	_window_update_hdr_state(wd);
-}
-
-bool DisplayServerWayland::window_is_hdr_output_requested(DisplayServerEnums::WindowID p_window_id) const {
-	ERR_FAIL_COND_V(!windows.has(p_window_id), false);
-	const WindowData &wd = windows[p_window_id];
-	return wd.hdr_requested;
-}
-
-bool DisplayServerWayland::window_is_hdr_output_enabled(DisplayServerEnums::WindowID p_window_id) const {
-	ERR_FAIL_COND_V(!windows.has(p_window_id), false);
-#if defined(RD_ENABLED)
-	if (rendering_context) {
-		return rendering_context->window_get_hdr_output_enabled(p_window_id);
-	}
-#endif
-	return false;
-}
-
-void DisplayServerWayland::window_set_hdr_output_reference_luminance(const float p_reference_luminance, DisplayServerEnums::WindowID p_window_id) {
-	ERR_FAIL_COND(!windows.has(p_window_id));
-	if (p_reference_luminance >= 0.0f) {
-		ERR_PRINT_ONCE("Manually setting reference white luminance is not supported on Linux devices, as they provide a user-facing brightness setting that directly controls reference white luminance.");
-	}
-}
-
-float DisplayServerWayland::window_get_hdr_output_reference_luminance(DisplayServerEnums::WindowID p_window_id) const {
-	return -1.0;
-}
-
-float DisplayServerWayland::window_get_hdr_output_current_reference_luminance(DisplayServerEnums::WindowID p_window_id) const {
-	ERR_FAIL_COND_V(!windows.has(p_window_id), 0.0);
-#if defined(RD_ENABLED)
-	if (rendering_context) {
-		return rendering_context->window_get_hdr_output_reference_luminance(p_window_id);
-	}
-#endif
-	return 0.0f;
-}
-
-void DisplayServerWayland::window_set_hdr_output_max_luminance(const float p_max_luminance, DisplayServerEnums::WindowID p_window_id) {
-	ERR_FAIL_COND(!windows.has(p_window_id));
-	if (p_max_luminance >= 0.0f) {
-		ERR_PRINT_ONCE("Manually setting max luminance is not supported on Linux devices as they provide a built-in method of calibrating max luminance without the need for additional apps or tools.");
-	}
-}
-
-float DisplayServerWayland::window_get_hdr_output_max_luminance(DisplayServerEnums::WindowID p_window_id) const {
-	return -1.0;
-}
-
-float DisplayServerWayland::window_get_hdr_output_current_max_luminance(DisplayServerEnums::WindowID p_window_id) const {
-	ERR_FAIL_COND_V(!windows.has(p_window_id), 0.0);
-#if defined(RD_ENABLED)
-	if (rendering_context) {
-		return rendering_context->window_get_hdr_output_max_luminance(p_window_id);
-	}
-#endif
-	return 0.0f;
-}
-
-float DisplayServerWayland::window_get_output_max_linear_value(DisplayServerEnums::WindowID p_window_id) const {
-	ERR_FAIL_COND_V(!windows.has(p_window_id), 1.0);
-#if defined(RD_ENABLED)
-	if (rendering_context) {
-		return rendering_context->window_get_output_max_linear_value(p_window_id);
-	}
-#endif
-
-	return 1.0f;
-}
-
-void DisplayServerWayland::cursor_set_shape(DisplayServerEnums::CursorShape p_shape) {
-	ERR_FAIL_INDEX(p_shape, DisplayServerEnums::CURSOR_MAX);
+void DisplayServerWayland::cursor_set_shape(CursorShape p_shape) {
+	ERR_FAIL_INDEX(p_shape, CURSOR_MAX);
 
 	MutexLock mutex_lock(wayland_thread.mutex);
 
@@ -1707,7 +1503,7 @@ void DisplayServerWayland::cursor_set_shape(DisplayServerEnums::CursorShape p_sh
 
 	cursor_shape = p_shape;
 
-	if (mouse_mode != DisplayServerEnums::MOUSE_MODE_VISIBLE && mouse_mode != DisplayServerEnums::MOUSE_MODE_CONFINED) {
+	if (mouse_mode != MOUSE_MODE_VISIBLE && mouse_mode != MOUSE_MODE_CONFINED) {
 		// Hidden.
 		return;
 	}
@@ -1715,17 +1511,17 @@ void DisplayServerWayland::cursor_set_shape(DisplayServerEnums::CursorShape p_sh
 	wayland_thread.cursor_set_shape(p_shape);
 }
 
-DisplayServerEnums::CursorShape DisplayServerWayland::cursor_get_shape() const {
+DisplayServerWayland::CursorShape DisplayServerWayland::cursor_get_shape() const {
 	MutexLock mutex_lock(wayland_thread.mutex);
 
 	return cursor_shape;
 }
 
-void DisplayServerWayland::cursor_set_custom_image(const Ref<Resource> &p_cursor, DisplayServerEnums::CursorShape p_shape, const Vector2 &p_hotspot) {
+void DisplayServerWayland::cursor_set_custom_image(const Ref<Resource> &p_cursor, CursorShape p_shape, const Vector2 &p_hotspot) {
 	MutexLock mutex_lock(wayland_thread.mutex);
 
 	if (p_cursor.is_valid()) {
-		HashMap<DisplayServerEnums::CursorShape, CustomCursor>::Iterator cursor_c = custom_cursors.find(p_shape);
+		HashMap<CursorShape, CustomCursor>::Iterator cursor_c = custom_cursors.find(p_shape);
 
 		if (cursor_c) {
 			if (cursor_c->value.resource == p_cursor && cursor_c->value.hotspot == p_hotspot) {
@@ -1768,7 +1564,7 @@ bool DisplayServerWayland::get_swap_cancel_ok() {
 	return swap_cancel_ok;
 }
 
-Error DisplayServerWayland::embed_process(DisplayServerEnums::WindowID p_window, ProcessID p_pid, const Rect2i &p_rect, bool p_visible, bool p_grab_focus) {
+Error DisplayServerWayland::embed_process(WindowID p_window, OS::ProcessID p_pid, const Rect2i &p_rect, bool p_visible, bool p_grab_focus) {
 	MutexLock mutex_lock(wayland_thread.mutex);
 
 	struct godot_embedding_compositor *ec = wayland_thread.get_embedding_compositor();
@@ -1820,7 +1616,7 @@ Error DisplayServerWayland::embed_process(DisplayServerEnums::WindowID p_window,
 	return OK;
 }
 
-Error DisplayServerWayland::request_close_embedded_process(ProcessID p_pid) {
+Error DisplayServerWayland::request_close_embedded_process(OS::ProcessID p_pid) {
 	MutexLock mutex_lock(wayland_thread.mutex);
 
 	struct godot_embedding_compositor *ec = wayland_thread.get_embedding_compositor();
@@ -1841,14 +1637,14 @@ Error DisplayServerWayland::request_close_embedded_process(ProcessID p_pid) {
 	return OK;
 }
 
-Error DisplayServerWayland::remove_embedded_process(ProcessID p_pid) {
+Error DisplayServerWayland::remove_embedded_process(OS::ProcessID p_pid) {
 	return request_close_embedded_process(p_pid);
 }
 
-ProcessID DisplayServerWayland::get_focused_process_id() {
+OS::ProcessID DisplayServerWayland::get_focused_process_id() {
 	MutexLock mutex_lock(wayland_thread.mutex);
 
-	ProcessID embedded_pid = wayland_thread.embedded_compositor_get_focused_pid();
+	OS::ProcessID embedded_pid = wayland_thread.embedded_compositor_get_focused_pid();
 
 	if (embedded_pid < 0) {
 		return OS::get_singleton()->get_process_id();
@@ -1924,7 +1720,7 @@ bool DisplayServerWayland::color_picker(const Callable &p_callback) {
 		return false;
 	}
 	MutexLock mutex_lock(wayland_thread.mutex);
-	DisplayServerEnums::WindowID window_id = DisplayServerEnums::MAIN_WINDOW_ID;
+	WindowID window_id = MAIN_WINDOW_ID;
 	// TODO: Use window IDs for multiwindow support.
 	WaylandThread::WindowState *ws = wayland_thread.wl_surface_get_window_state(wayland_thread.window_get_wl_surface(window_id));
 	return portal_desktop->color_picker((ws ? ws->exported_handle : String()), p_callback);
@@ -1957,26 +1753,10 @@ void DisplayServerWayland::process_events() {
 	while (wayland_thread.has_message()) {
 		Ref<WaylandThread::Message> msg = wayland_thread.pop_message();
 
-		Ref<WaylandThread::WindowHoverMessage> winhov_msg = msg;
-		if (winhov_msg.is_valid()) {
-			DisplayServerEnums::WindowID winhov_id = winhov_msg->id;
-			if (winhov_id != DisplayServerEnums::INVALID_WINDOW_ID && !windows.has(winhov_id)) {
-				// The window got deleted in the meantime. We can't depend on this message
-				// as we likely done all the relevant handling ourselves here, in the main
-				// thread.
-				continue;
-			}
-
-			_hover_window(winhov_id);
-
-			continue;
-		}
-
-		// The following `WindowMessage`s do not accept invalid windows. We can thus
-		// consolidate everything in a single check.
+		// Generic check. Not actual message handling.
 		Ref<WaylandThread::WindowMessage> win_msg = msg;
 		if (win_msg.is_valid()) {
-			ERR_CONTINUE_MSG(win_msg->id == DisplayServerEnums::INVALID_WINDOW_ID, "Invalid window ID received from Wayland thread.");
+			ERR_CONTINUE_MSG(win_msg->id == INVALID_WINDOW_ID, "Invalid window ID received from Wayland thread.");
 
 			if (!windows.has(win_msg->id)) {
 				// Window got probably deleted.
@@ -1986,23 +1766,7 @@ void DisplayServerWayland::process_events() {
 
 		Ref<WaylandThread::WindowRectMessage> winrect_msg = msg;
 		if (winrect_msg.is_valid()) {
-			int scale = winrect_msg->buffer_scale;
-
-			WaylandThread::WindowState *ws = wayland_thread.window_get_state(winrect_msg->id);
-			ERR_CONTINUE(ws == nullptr);
-
-			if (scale == 0) {
-				// This should *never* happen. We fallback to the latest scale but it might
-				// have changed in the meantime to something invalid (non-integer divisor),
-				// leading to a protocol error.
-				ERR_PRINT("Wayland Thread did not report buffer scale at the time of resize.");
-				scale = wayland_thread.window_state_get_preferred_buffer_scale(ws);
-			}
-
-			wayland_thread.window_state_set_buffer_scale(ws, scale);
-
 			_update_window_rect(winrect_msg->rect, winrect_msg->id);
-
 			continue;
 		}
 
@@ -2010,13 +1774,21 @@ void DisplayServerWayland::process_events() {
 		if (winev_msg.is_valid() && windows.has(winev_msg->id)) {
 			_send_window_event(winev_msg->event, winev_msg->id);
 
-			if (winev_msg->event == DisplayServerEnums::WINDOW_EVENT_FOCUS_IN) {
-				AccessibilityServer::get_singleton()->set_window_focused(winev_msg->id, true);
+			if (winev_msg->event == WINDOW_EVENT_FOCUS_IN) {
+#ifdef ACCESSKIT_ENABLED
+				if (accessibility_driver) {
+					accessibility_driver->accessibility_set_window_focused(winev_msg->id, true);
+				}
+#endif
 				if (OS::get_singleton()->get_main_loop()) {
 					OS::get_singleton()->get_main_loop()->notification(MainLoop::NOTIFICATION_APPLICATION_FOCUS_IN);
 				}
-			} else if (winev_msg->event == DisplayServerEnums::WINDOW_EVENT_FOCUS_OUT) {
-				AccessibilityServer::get_singleton()->set_window_focused(winev_msg->id, false);
+			} else if (winev_msg->event == WINDOW_EVENT_FOCUS_OUT) {
+#ifdef ACCESSKIT_ENABLED
+				if (accessibility_driver) {
+					accessibility_driver->accessibility_set_window_focused(winev_msg->id, false);
+				}
+#endif
 				if (OS::get_singleton()->get_main_loop()) {
 					OS::get_singleton()->get_main_loop()->notification(MainLoop::NOTIFICATION_APPLICATION_FOCUS_OUT);
 				}
@@ -2027,59 +1799,42 @@ void DisplayServerWayland::process_events() {
 
 		Ref<WaylandThread::InputEventMessage> inputev_msg = msg;
 		if (inputev_msg.is_valid()) {
-			bool process_popups = false;
-			Point2 position;
-			DisplayServerEnums::WindowID window_id = DisplayServerEnums::INVALID_WINDOW_ID;
-
 			Ref<InputEventMouseButton> mb = inputev_msg->event;
-			if (mb.is_valid()) {
-				process_popups = (mb->is_pressed() && mb->get_button_mask() != last_mouse_monitor_mask);
-				position = mb->get_position();
-				window_id = mb->get_window_id();
-
-				last_mouse_monitor_mask = mb->get_button_mask();
-			}
-
-			Ref<InputEventScreenTouch> st = inputev_msg->event;
-			if (st.is_valid()) {
-				process_popups = st->is_pressed() && (st->is_pressed() != last_touch_monitor_pressed);
-				position = st->get_position();
-				window_id = st->get_window_id();
-
-				last_touch_monitor_pressed = st->is_pressed();
-			}
 
 			bool handled = false;
+			if (mb.is_valid()) {
+				BitField<MouseButtonMask> mouse_mask = mb->get_button_mask();
+				if (!popup_menu_list.is_empty() && mb->is_pressed() && mouse_mask != last_mouse_monitor_mask) {
+					// Popup menu handling.
+					List<WindowID>::Element *E = popup_menu_list.back();
+					List<WindowID>::Element *C = nullptr;
 
-			if (!popup_menu_list.is_empty() && process_popups) {
-				List<DisplayServerEnums::WindowID>::Element *E = popup_menu_list.back();
-				List<DisplayServerEnums::WindowID>::Element *C = nullptr;
+					// Looking for the oldest popup to close.
+					while (E) {
+						WindowData &wd = windows[E->get()];
+						Point2 global_pos = mb->get_position() + window_get_position(mb->get_window_id());
+						if (wd.rect.has_point(global_pos)) {
+							break;
+						} else if (wd.safe_rect.has_point(global_pos)) {
+							break;
+						}
 
-				Point2 global_pos = position + window_get_position(window_id);
-
-				// Looking for the oldest popup to close.
-				while (E) {
-					WindowData &wd = windows[E->get()];
-					if (wd.rect.has_point(global_pos)) {
-						break;
-					} else if (wd.safe_rect.has_point(global_pos)) {
-						break;
+						C = E;
+						E = E->prev();
 					}
 
-					C = E;
-					E = E->prev();
+					if (C) {
+						handled = true;
+						_send_window_event(WINDOW_EVENT_CLOSE_REQUEST, C->get());
+					}
 				}
 
-				if (C) {
-					handled = true;
-					_send_window_event(DisplayServerEnums::WINDOW_EVENT_CLOSE_REQUEST, C->get());
-				}
+				last_mouse_monitor_mask = mouse_mask;
 			}
 
 			if (!handled) {
 				Input::get_singleton()->parse_input_event(inputev_msg->event);
 			}
-
 			continue;
 		}
 
@@ -2134,22 +1889,12 @@ void DisplayServerWayland::process_events() {
 			}
 			continue;
 		}
-
-		Ref<WaylandThread::ColorProfileMessage> color_profile_msg = msg;
-		if (color_profile_msg.is_valid()) {
-			WindowData &wd = windows[color_profile_msg->id];
-			wd.color_profile = color_profile_msg->color_profile;
-
-			_window_update_hdr_state(wd);
-			_send_window_event(DisplayServerEnums::WINDOW_EVENT_OUTPUT_MAX_LINEAR_VALUE_CHANGED, wd.id);
-			continue;
-		}
 	}
 
 	switch (suspend_state) {
 		case SuspendState::NONE: {
 			bool emulate_vsync = false;
-			for (KeyValue<DisplayServerEnums::WindowID, WindowData> &pair : windows) {
+			for (KeyValue<DisplayServer::WindowID, WindowData> &pair : windows) {
 				if (pair.value.emulate_vsync) {
 					emulate_vsync = true;
 					break;
@@ -2246,11 +1991,10 @@ void DisplayServerWayland::swap_buffers() {
 
 void DisplayServerWayland::set_icon(const Ref<Image> &p_icon) {
 	MutexLock mutex_lock(wayland_thread.mutex);
-
-	wayland_thread.set_default_icon(p_icon);
+	wayland_thread.set_icon(p_icon);
 }
 
-void DisplayServerWayland::set_context(DisplayServerEnums::Context p_context) {
+void DisplayServerWayland::set_context(Context p_context) {
 	MutexLock mutex_lock(wayland_thread.mutex);
 
 	DEBUG_LOG_WAYLAND(vformat("Setting context %d.", p_context));
@@ -2258,7 +2002,7 @@ void DisplayServerWayland::set_context(DisplayServerEnums::Context p_context) {
 	context = p_context;
 
 	String app_id = _get_app_id_from_context(p_context);
-	wayland_thread.window_set_app_id(DisplayServerEnums::MAIN_WINDOW_ID, app_id);
+	wayland_thread.window_set_app_id(MAIN_WINDOW_ID, app_id);
 }
 
 bool DisplayServerWayland::is_window_transparency_available() const {
@@ -2277,10 +2021,6 @@ Vector<String> DisplayServerWayland::get_rendering_drivers_func() {
 	drivers.push_back("vulkan");
 #endif
 
-#ifdef WEBGPU_ENABLED
-	drivers.push_back("webgpu");
-#endif
-
 #ifdef GLES3_ENABLED
 	drivers.push_back("opengl3");
 	drivers.push_back("opengl3_es");
@@ -2290,7 +2030,7 @@ Vector<String> DisplayServerWayland::get_rendering_drivers_func() {
 	return drivers;
 }
 
-DisplayServer *DisplayServerWayland::create_func(const String &p_rendering_driver, DisplayServerEnums::WindowMode p_mode, DisplayServerEnums::VSyncMode p_vsync_mode, uint32_t p_flags, const Point2i *p_position, const Size2i &p_resolution, int p_screen, DisplayServerEnums::Context p_context, int64_t p_parent_window, Error &r_error) {
+DisplayServer *DisplayServerWayland::create_func(const String &p_rendering_driver, WindowMode p_mode, VSyncMode p_vsync_mode, uint32_t p_flags, const Point2i *p_position, const Size2i &p_resolution, int p_screen, Context p_context, int64_t p_parent_window, Error &r_error) {
 	DisplayServer *ds = memnew(DisplayServerWayland(p_rendering_driver, p_mode, p_vsync_mode, p_flags, p_resolution, p_context, p_parent_window, r_error));
 	if (r_error != OK) {
 		ERR_PRINT("Can't create the Wayland display server.");
@@ -2301,7 +2041,7 @@ DisplayServer *DisplayServerWayland::create_func(const String &p_rendering_drive
 	return ds;
 }
 
-DisplayServerWayland::DisplayServerWayland(const String &p_rendering_driver, DisplayServerEnums::WindowMode p_mode, DisplayServerEnums::VSyncMode p_vsync_mode, uint32_t p_flags, const Vector2i &p_resolution, DisplayServerEnums::Context p_context, int64_t p_parent_window, Error &r_error) {
+DisplayServerWayland::DisplayServerWayland(const String &p_rendering_driver, WindowMode p_mode, VSyncMode p_vsync_mode, uint32_t p_flags, const Vector2i &p_resolution, Context p_context, int64_t p_parent_window, Error &r_error) {
 #if defined(GLES3_ENABLED) || defined(DBUS_ENABLED)
 #ifdef SOWRAP_ENABLED
 #ifdef DEBUG_ENABLED
@@ -2341,6 +2081,16 @@ DisplayServerWayland::DisplayServerWayland(const String &p_rendering_driver, Dis
 	}
 #endif
 
+#ifdef ACCESSKIT_ENABLED
+	if (accessibility_get_mode() != DisplayServer::AccessibilityMode::ACCESSIBILITY_DISABLED) {
+		accessibility_driver = memnew(AccessibilityDriverAccessKit);
+		if (accessibility_driver->init() != OK) {
+			memdelete(accessibility_driver);
+			accessibility_driver = nullptr;
+		}
+	}
+#endif
+
 	rendering_driver = p_rendering_driver;
 
 	bool driver_found = false;
@@ -2357,11 +2107,6 @@ DisplayServerWayland::DisplayServerWayland(const String &p_rendering_driver, Dis
 		rendering_context = memnew(RenderingContextDriverVulkanWayland);
 	}
 #endif // VULKAN_ENABLED
-#ifdef WEBGPU_ENABLED
-	if (rendering_driver == "webgpu") {
-		rendering_context = memnew(RenderingContextDriverWebGPUWayland);
-	}
-#endif // WEBGPU_ENABLED
 
 	if (rendering_context) {
 		if (rendering_context->initialize() != OK) {
@@ -2372,8 +2117,8 @@ DisplayServerWayland::DisplayServerWayland(const String &p_rendering_driver, Dis
 			if (fallback_to_opengl3 && rendering_driver != "opengl3") {
 				WARN_PRINT("Your video card drivers seem not to support the required Vulkan version, switching to OpenGL 3.");
 				rendering_driver = "opengl3";
-				OS::get_singleton()->set_current_rendering_method("gl_compatibility", OS::RENDERING_SOURCE_FALLBACK);
-				OS::get_singleton()->set_current_rendering_driver_name(rendering_driver, OS::RENDERING_SOURCE_FALLBACK);
+				OS::get_singleton()->set_current_rendering_method("gl_compatibility");
+				OS::get_singleton()->set_current_rendering_driver_name(rendering_driver);
 			} else
 #endif // GLES3_ENABLED
 			{
@@ -2460,7 +2205,7 @@ DisplayServerWayland::DisplayServerWayland(const String &p_rendering_driver, Dis
 				if (fallback) {
 					WARN_PRINT("Your video card drivers seem not to support the required OpenGL version, switching to OpenGLES.");
 					rendering_driver = "opengl3_es";
-					OS::get_singleton()->set_current_rendering_driver_name(rendering_driver, OS::RENDERING_SOURCE_FALLBACK);
+					OS::get_singleton()->set_current_rendering_driver_name(rendering_driver);
 				} else {
 					r_error = ERR_UNAVAILABLE;
 
@@ -2512,26 +2257,30 @@ DisplayServerWayland::DisplayServerWayland(const String &p_rendering_driver, Dis
 		ERR_FAIL_MSG("Video driver not found.");
 	}
 
-	cursor_set_shape(DisplayServerEnums::CURSOR_BUSY);
+	cursor_set_shape(CURSOR_BUSY);
 
-	WindowData &wd = windows[DisplayServerEnums::MAIN_WINDOW_ID];
+	WindowData &wd = windows[MAIN_WINDOW_ID];
 
-	wd.id = DisplayServerEnums::MAIN_WINDOW_ID;
+	wd.id = MAIN_WINDOW_ID;
 	wd.mode = p_mode;
 	wd.flags = p_flags;
 	wd.vsync_mode = p_vsync_mode;
 	wd.rect.size = p_resolution;
 	wd.title = "Godot";
 
-	if (!AccessibilityServer::get_singleton()->window_create(wd.id, nullptr)) {
+#ifdef ACCESSKIT_ENABLED
+	if (accessibility_driver && !accessibility_driver->window_create(wd.id, nullptr)) {
 		if (OS::get_singleton()->is_stdout_verbose()) {
 			ERR_PRINT("Can't create an accessibility adapter for window, accessibility support disabled!");
 		}
+		memdelete(accessibility_driver);
+		accessibility_driver = nullptr;
 	}
+#endif
 
-	show_window(DisplayServerEnums::MAIN_WINDOW_ID);
+	show_window(MAIN_WINDOW_ID);
 
-	if (!windows.has(DisplayServerEnums::MAIN_WINDOW_ID) || !windows[DisplayServerEnums::MAIN_WINDOW_ID].visible) {
+	if (!windows.has(MAIN_WINDOW_ID) || !windows[MAIN_WINDOW_ID].visible) {
 		ERR_PRINT("Could not map the main window.");
 		r_error = ERR_CANT_CREATE;
 		return;
@@ -2540,7 +2289,7 @@ DisplayServerWayland::DisplayServerWayland(const String &p_rendering_driver, Dis
 #ifdef RD_ENABLED
 	if (rendering_context) {
 		rendering_device = memnew(RenderingDevice);
-		if (rendering_device->initialize(rendering_context, DisplayServerEnums::MAIN_WINDOW_ID) != OK) {
+		if (rendering_device->initialize(rendering_context, MAIN_WINDOW_ID) != OK) {
 			memdelete(rendering_device);
 			rendering_device = nullptr;
 			memdelete(rendering_context);
@@ -2548,7 +2297,7 @@ DisplayServerWayland::DisplayServerWayland(const String &p_rendering_driver, Dis
 			r_error = ERR_UNAVAILABLE;
 			return;
 		}
-		rendering_device->screen_create(DisplayServerEnums::MAIN_WINDOW_ID);
+		rendering_device->screen_create(MAIN_WINDOW_ID);
 
 		RendererCompositorRD::make_current();
 	}
@@ -2598,19 +2347,21 @@ DisplayServerWayland::~DisplayServerWayland() {
 	// Iterating on the window map while we delete stuff from it is a bit
 	// uncomfortable, plus we can't even delete /all/ windows in an arbitrary order
 	// (due to popups).
-	List<DisplayServerEnums::WindowID> toplevels;
+	List<WindowID> toplevels;
 
-	for (const KeyValue<DisplayServerEnums::WindowID, WindowData> &pair : windows) {
-		DisplayServerEnums::WindowID id = pair.key;
+	for (const KeyValue<WindowID, WindowData> &pair : windows) {
+		WindowID id = pair.key;
 
-		if (!window_get_flag(DisplayServerEnums::WINDOW_FLAG_POPUP_WM_HINT, id)) {
+		if (!window_get_flag(WINDOW_FLAG_POPUP_WM_HINT, id)) {
 			toplevels.push_back(id);
-		} else {
-			AccessibilityServer::get_singleton()->window_destroy(id);
+#ifdef ACCESSKIT_ENABLED
+		} else if (accessibility_driver) {
+			accessibility_driver->window_destroy(id);
+#endif
 		}
 	}
 
-	for (DisplayServerEnums::WindowID &id : toplevels) {
+	for (WindowID &id : toplevels) {
 		_delete_window(id);
 	}
 	windows.clear();
@@ -2634,6 +2385,12 @@ DisplayServerWayland::~DisplayServerWayland() {
 #ifdef SPEECHD_ENABLED
 	if (tts) {
 		memdelete(tts);
+	}
+#endif
+
+#ifdef ACCESSKIT_ENABLED
+	if (accessibility_driver) {
+		memdelete(accessibility_driver);
 	}
 #endif
 

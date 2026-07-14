@@ -46,9 +46,8 @@
 */
 
 #include "../util.h"
-#include "openxr_extension_wrapper.h"
-
 #include "core/object/ref_counted.h"
+#include "openxr_extension_wrapper.h"
 
 #include <openxr/openxr.h>
 

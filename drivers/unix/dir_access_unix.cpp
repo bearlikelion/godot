@@ -32,6 +32,7 @@
 
 #if defined(UNIX_ENABLED)
 
+#include "core/os/memory.h"
 #include "core/os/os.h"
 #include "core/string/print_string.h"
 #include "core/templates/list.h"
@@ -43,7 +44,6 @@
 #include <sys/statfs.h>
 #endif
 #include <sys/statvfs.h>
-
 #include <cerrno>
 #include <cstdio>
 #include <cstdlib>

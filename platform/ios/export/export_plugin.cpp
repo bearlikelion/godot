@@ -34,7 +34,6 @@
 #include "run_icon_svg.gen.h"
 
 #include "editor/editor_node.h"
-#include "main/splash.gen.h"
 
 Vector<String> EditorExportPlatformIOS::device_types({ "iPhone", "iPad" });
 
@@ -99,28 +98,28 @@ HashMap<String, Variant> EditorExportPlatformIOS::get_custom_project_settings(co
 	switch (image_scale_mode) {
 		case 0: {
 			String logo_path = get_project_setting(p_preset, "application/boot_splash/image");
-			RSE::SplashStretchMode stretch_mode = get_project_setting(p_preset, "application/boot_splash/stretch_mode");
+			RenderingServer::SplashStretchMode stretch_mode = get_project_setting(p_preset, "application/boot_splash/stretch_mode");
 			// If custom logo is not specified, Godot does not scale default one, so we should do the same.
 			if (logo_path.is_empty()) {
 				value = "center";
 			} else {
 				switch (stretch_mode) {
-					case RSE::SplashStretchMode::SPLASH_STRETCH_MODE_DISABLED: {
+					case RenderingServer::SplashStretchMode::SPLASH_STRETCH_MODE_DISABLED: {
 						value = "center";
 					} break;
-					case RSE::SplashStretchMode::SPLASH_STRETCH_MODE_KEEP: {
+					case RenderingServer::SplashStretchMode::SPLASH_STRETCH_MODE_KEEP: {
 						value = "scaleAspectFit";
 					} break;
-					case RSE::SplashStretchMode::SPLASH_STRETCH_MODE_KEEP_WIDTH: {
+					case RenderingServer::SplashStretchMode::SPLASH_STRETCH_MODE_KEEP_WIDTH: {
 						value = "scaleAspectFit";
 					} break;
-					case RSE::SplashStretchMode::SPLASH_STRETCH_MODE_KEEP_HEIGHT: {
+					case RenderingServer::SplashStretchMode::SPLASH_STRETCH_MODE_KEEP_HEIGHT: {
 						value = "scaleAspectFit";
 					} break;
-					case RSE::SplashStretchMode::SPLASH_STRETCH_MODE_COVER: {
+					case RenderingServer::SplashStretchMode::SPLASH_STRETCH_MODE_COVER: {
 						value = "scaleAspectFill";
 					} break;
-					case RSE::SplashStretchMode::SPLASH_STRETCH_MODE_IGNORE: {
+					case RenderingServer::SplashStretchMode::SPLASH_STRETCH_MODE_IGNORE: {
 						value = "scaleToFill";
 					} break;
 				}

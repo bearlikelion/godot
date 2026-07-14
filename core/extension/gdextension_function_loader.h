@@ -31,6 +31,7 @@
 #pragma once
 
 #include "core/extension/gdextension_loader.h"
+#include "core/os/shared_object.h"
 
 class GDExtension;
 

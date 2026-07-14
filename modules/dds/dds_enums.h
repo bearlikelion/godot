@@ -164,8 +164,6 @@ enum DDSFormat {
 	DDS_LUMINANCE,
 	DDS_LUMINANCE_ALPHA,
 	DDS_LUMINANCE_ALPHA_4,
-	DDS_RG8,
-	DDS_R8,
 	DDS_MAX
 };
 
@@ -225,6 +223,4 @@ static const DDSFormatInfo dds_format_info[DDS_MAX] = {
 	{ "GRAYSCALE", false, 1, 1, Image::FORMAT_L8 },
 	{ "GRAYSCALE_ALPHA", false, 1, 2, Image::FORMAT_LA8 },
 	{ "GRAYSCALE_ALPHA_4", false, 1, 1, Image::FORMAT_LA8 },
-	{ "RG8", false, 1, 2, Image::FORMAT_RG8 },
-	{ "R8", false, 1, 1, Image::FORMAT_R8 },
 };

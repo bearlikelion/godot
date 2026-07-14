@@ -147,8 +147,6 @@ static int sysctl_arnd_wrapper(unsigned char *buf, size_t buflen)
 
 #include <stdio.h>
 
-const char *mbedtls_platform_dev_random = MBEDTLS_PLATFORM_DEV_RANDOM;
-
 int mbedtls_platform_entropy_poll(void *data,
                                   unsigned char *output, size_t len, size_t *olen)
 {
@@ -182,7 +180,7 @@ int mbedtls_platform_entropy_poll(void *data,
 
     *olen = 0;
 
-    file = fopen(mbedtls_platform_dev_random, "rb");
+    file = fopen("/dev/urandom", "rb");
     if (file == NULL) {
         return MBEDTLS_ERR_ENTROPY_SOURCE_FAILED;
     }

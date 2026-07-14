@@ -7,6 +7,7 @@ on:
 env:
   SCONS_FLAGS: >-
     dev_mode=yes
+    tests=no
     debug_symbols=no
     use_closure_compiler=yes
   EM_VERSION: 4.0.11
@@ -20,29 +21,17 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - name: Template w/ threads, 64-bit (target=template_release, threads=yes, arch=wasm64)
+          - name: Template w/ threads (target=template_release, threads=yes)
             cache-name: web-template
             target: template_release
-            scons-flags: threads=yes arch=wasm64
+            scons-flags: threads=yes
             artifact: true
 
-          - name: Template w/o threads, 32-bit (target=template_release, threads=no, arch=wasm32)
+          - name: Template w/o threads (target=template_release, threads=no)
             cache-name: web-nothreads-template
             target: template_release
-            scons-flags: threads=no arch=wasm32
+            scons-flags: threads=no
             artifact: true
-
-          - name: Template WebGPU (target=template_release, webgpu=yes)
-            cache-name: web-webgpu-template
-            target: template_release
-            scons-flags: threads=no webgpu=yes opengl3=no
-            artifact: true
-
-          - name: Template WebGPU debug (target=template_debug, webgpu=yes)
-            cache-name: web-webgpu-template-debug
-            target: template_debug
-            scons-flags: threads=no webgpu=yes opengl3=no
-            artifact: false
 
     steps:
       - name: Checkout

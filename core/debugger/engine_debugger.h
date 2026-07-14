@@ -30,7 +30,6 @@
 
 #pragma once
 
-#include "core/object/ref_counted.h"
 #include "core/string/string_name.h"
 #include "core/string/ustring.h"
 #include "core/templates/hash_map.h"
@@ -48,7 +47,7 @@ public:
 
 	typedef Error (*CaptureFunc)(void *p_user, const String &p_msg, const Array &p_args, bool &r_captured);
 
-	typedef Ref<RemoteDebuggerPeer> (*CreatePeerFunc)(const String &p_uri);
+	typedef RemoteDebuggerPeer *(*CreatePeerFunc)(const String &p_uri);
 
 	class Profiler {
 		friend class EngineDebugger;

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2020 - 2026 ThorVG project. All rights reserved.
+ * Copyright (c) 2020 - 2024 the ThorVG project. All rights reserved.
 
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -23,13 +23,9 @@
 #ifndef _TVG_ARRAY_H_
 #define _TVG_ARRAY_H_
 
-#include "tvgCommon.h"
-
-#define ARRAY_FOREACH(A, B) \
-    for (auto A = (B).begin(); A < (B).end(); ++A)
-
-#define ARRAY_REVERSE_FOREACH(A, B) \
-    for (auto A = (B).end() - 1; A >= (B).begin(); --A)
+#include <memory.h>
+#include <cstdint>
+#include <cstdlib>
 
 namespace tvg
 {
@@ -41,7 +37,7 @@ struct Array
     uint32_t count = 0;
     uint32_t reserved = 0;
 
-    Array() = default;
+    Array(){}
 
     Array(int32_t size)
     {
@@ -58,7 +54,7 @@ struct Array
     {
         if (count + 1 > reserved) {
             reserved = count + (count + 2) / 2;
-            data = tvg::realloc<T>(data, sizeof(T) * reserved);
+            data = static_cast<T*>(realloc(data, sizeof(T) * reserved));
         }
         data[count++] = element;
     }
@@ -75,7 +71,7 @@ struct Array
     {
         if (size > reserved) {
             reserved = size;
-            data = tvg::realloc<T>(data, sizeof(T) * reserved);
+            data = static_cast<T*>(realloc(data, sizeof(T) * reserved));
         }
         return true;
     }
@@ -93,24 +89,6 @@ struct Array
     T& operator[](size_t idx)
     {
         return data[idx];
-    }
-
-    void operator=(const Array& rhs)
-    {
-        reserve(rhs.count);
-        if (rhs.count > 0) memcpy(data, rhs.data, sizeof(T) * rhs.count);
-        count = rhs.count;
-    }
-
-    void move(Array& to)
-    {
-        to.reset();
-        to.data = data;
-        to.count = count;
-        to.reserved = reserved;
-
-        data = nullptr;
-        count = reserved = 0;
     }
 
     const T* begin() const
@@ -148,12 +126,6 @@ struct Array
         return data[count - 1];
     }
 
-    T& next()
-    {
-        if (full()) grow(count + 1);
-        return data[count++];
-    }
-
     T& first()
     {
         return data[0];
@@ -166,7 +138,7 @@ struct Array
 
     void reset()
     {
-        tvg::free(data);
+        free(data);
         data = nullptr;
         count = reserved = 0;
     }
@@ -181,14 +153,48 @@ struct Array
         return count == 0;
     }
 
-    bool full()
+    template<class COMPARE>
+    void sort()
     {
-        return count == reserved;
+        qsort<COMPARE>(data, 0, static_cast<int32_t>(count) - 1);
+    }
+
+    void operator=(const Array& rhs)
+    {
+        reserve(rhs.count);
+        if (rhs.count > 0) memcpy(data, rhs.data, sizeof(T) * rhs.count);
+        count = rhs.count;
     }
 
     ~Array()
     {
-        tvg::free(data);
+        free(data);
+    }
+
+private:
+    template<class COMPARE>
+    void qsort(T* arr, int32_t low, int32_t high)
+    {
+        if (low < high) {
+            int32_t i = low;
+            int32_t j = high;
+            T tmp = arr[low];
+            while (i < j) {
+                while (i < j && !COMPARE{}(arr[j], tmp)) --j;
+                if (i < j) {
+                    arr[i] = arr[j];
+                    ++i;
+                }
+                while (i < j && COMPARE{}(arr[i], tmp)) ++i;
+                if (i < j) {
+                    arr[j] = arr[i];
+                    --j;
+                }
+            }
+            arr[i] = tmp;
+            qsort<COMPARE>(arr, low, i - 1);
+            qsort<COMPARE>(arr, i + 1, high);
+        }
     }
 };
 

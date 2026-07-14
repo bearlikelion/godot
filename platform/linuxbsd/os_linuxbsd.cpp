@@ -34,15 +34,13 @@
 #include "core/io/dir_access.h"
 #include "core/io/file_access.h"
 #include "core/os/main_loop.h"
-#include "core/os/os.h"
+#ifdef SDL_ENABLED
+#include "drivers/sdl/joypad_sdl.h"
+#endif
 #include "core/profiling/profiling.h"
 #include "main/main.h"
 #include "servers/display/display_server.h"
 #include "servers/rendering/rendering_server.h"
-
-#ifdef SDL_ENABLED
-#include "drivers/sdl/joypad_sdl.h"
-#endif
 
 #ifdef X11_ENABLED
 #include "x11/detect_prime_x11.h"
@@ -80,7 +78,6 @@
 #include <sys/types.h>
 #include <sys/utsname.h>
 #include <unistd.h>
-
 #include <cstdio>
 #include <cstdlib>
 
@@ -90,14 +87,6 @@
 
 #if defined(__FreeBSD__)
 #include <sys/sysctl.h>
-#endif
-
-#ifdef FONTCONFIG_ENABLED
-#ifdef SOWRAP_ENABLED
-#include "fontconfig-so_wrap.h"
-#else
-#include <fontconfig/fontconfig.h>
-#endif
 #endif
 
 void OS_LinuxBSD::alert(const String &p_alert, const String &p_title) {

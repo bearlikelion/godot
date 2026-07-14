@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2020 - 2026 ThorVG project. All rights reserved.
+ * Copyright (c) 2020 - 2024 the ThorVG project. All rights reserved.
 
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -22,23 +22,98 @@
 
 #include "tvgFill.h"
 
+/************************************************************************/
+/* Internal Class Implementation                                        */
+/************************************************************************/
+
+Fill* RadialGradient::Impl::duplicate()
+{
+    auto ret = RadialGradient::gen();
+    if (!ret) return nullptr;
+
+    ret->pImpl->cx = cx;
+    ret->pImpl->cy = cy;
+    ret->pImpl->r = r;
+    ret->pImpl->fx = fx;
+    ret->pImpl->fy = fy;
+    ret->pImpl->fr = fr;
+
+    return ret.release();
+}
+
+
+Result RadialGradient::Impl::radial(float cx, float cy, float r, float fx, float fy, float fr)
+{
+    if (r < 0 || fr < 0) return Result::InvalidArguments;
+
+    this->cx = cx;
+    this->cy = cy;
+    this->r = r;
+    this->fx = fx;
+    this->fy = fy;
+    this->fr = fr;
+
+    return Result::Success;
+};
+
+
+Fill* LinearGradient::Impl::duplicate()
+{
+    auto ret = LinearGradient::gen();
+    if (!ret) return nullptr;
+
+    ret->pImpl->x1 = x1;
+    ret->pImpl->y1 = y1;
+    ret->pImpl->x2 = x2;
+    ret->pImpl->y2 = y2;
+
+    return ret.release();
+};
+
 
 /************************************************************************/
-/* Fill Class Implementation                                            */
+/* External Class Implementation                                        */
 /************************************************************************/
 
-Fill::Fill() = default;
-Fill::~Fill() = default;
+Fill::Fill():pImpl(new Impl())
+{
+}
+
+
+Fill::~Fill()
+{
+    delete(pImpl);
+}
+
 
 Result Fill::colorStops(const ColorStop* colorStops, uint32_t cnt) noexcept
 {
-    return pImpl->update(colorStops, cnt);
+    if ((!colorStops && cnt > 0) || (colorStops && cnt == 0)) return Result::InvalidArguments;
+
+    if (cnt == 0) {
+        if (pImpl->colorStops) {
+            free(pImpl->colorStops);
+            pImpl->colorStops = nullptr;
+            pImpl->cnt = 0;
+        }
+        return Result::Success;
+    }
+
+    if (pImpl->cnt != cnt) {
+        pImpl->colorStops = static_cast<ColorStop*>(realloc(pImpl->colorStops, cnt * sizeof(ColorStop)));
+    }
+
+    pImpl->cnt = cnt;
+    memcpy(pImpl->colorStops, colorStops, cnt * sizeof(ColorStop));
+
+    return Result::Success;
 }
 
 
 uint32_t Fill::colorStops(const ColorStop** colorStops) const noexcept
 {
     if (colorStops) *colorStops = pImpl->colorStops;
+
     return pImpl->cnt;
 }
 
@@ -46,6 +121,7 @@ uint32_t Fill::colorStops(const ColorStop** colorStops) const noexcept
 Result Fill::spread(FillSpread s) noexcept
 {
     pImpl->spread = s;
+
     return Result::Success;
 }
 
@@ -58,47 +134,70 @@ FillSpread Fill::spread() const noexcept
 
 Result Fill::transform(const Matrix& m) noexcept
 {
-    pImpl->transform = m;
+    if (!pImpl->transform) {
+        pImpl->transform = static_cast<Matrix*>(malloc(sizeof(Matrix)));
+    }
+    *pImpl->transform = m;
     return Result::Success;
 }
 
 
-Matrix& Fill::transform() const noexcept
+Matrix Fill::transform() const noexcept
 {
-    return pImpl->transform;
+    if (pImpl->transform) return *pImpl->transform;
+    return {1, 0, 0, 0, 1, 0, 0, 0, 1};
 }
 
 
 Fill* Fill::duplicate() const noexcept
 {
-    if (type() == Type::LinearGradient) return CONST_LINEAR(this)->duplicate();
-    else if (type() == Type::RadialGradient) return CONST_RADIAL(this)->duplicate();
-    return nullptr;
+    return pImpl->duplicate();
 }
 
 
-/************************************************************************/
-/* RadialGradient Class Implementation                                  */
-/************************************************************************/
-
-RadialGradient::RadialGradient() = default;
-
-
-Result RadialGradient::radial(float cx, float cy, float r, float fx, float fy, float fr) noexcept
+TVG_DEPRECATED uint32_t Fill::identifier() const noexcept
 {
-    return RADIAL(this)->radial(cx, cy, r, fx, fy, fr);
+    return (uint32_t) type();
 }
 
 
-Result RadialGradient::radial(float* cx, float* cy, float* r, float* fx, float* fy, float* fr) const noexcept
+RadialGradient::RadialGradient():pImpl(new Impl())
 {
-    return CONST_RADIAL(this)->radial(cx, cy, r, fx, fy, fr);
+    Fill::pImpl->method(new FillDup<RadialGradient::Impl>(pImpl));
 }
 
 
-RadialGradient* RadialGradient::gen() noexcept
+RadialGradient::~RadialGradient()
 {
-    return new RadialGradientImpl;
+    delete(pImpl);
+}
+
+
+Result RadialGradient::radial(float cx, float cy, float r) noexcept
+{
+    return pImpl->radial(cx, cy, r, cx, cy, 0.0f);
+}
+
+
+Result RadialGradient::radial(float* cx, float* cy, float* r) const noexcept
+{
+    if (cx) *cx = pImpl->cx;
+    if (cy) *cy = pImpl->cy;
+    if (r) *r = pImpl->r;
+
+    return Result::Success;
+}
+
+
+unique_ptr<RadialGradient> RadialGradient::gen() noexcept
+{
+    return unique_ptr<RadialGradient>(new RadialGradient);
+}
+
+
+TVG_DEPRECATED uint32_t RadialGradient::identifier() noexcept
+{
+    return (uint32_t) Type::RadialGradient;
 }
 
 
@@ -108,28 +207,49 @@ Type RadialGradient::type() const noexcept
 }
 
 
-/************************************************************************/
-/* LinearGradient Class Implementation                                  */
-/************************************************************************/
+LinearGradient::LinearGradient():pImpl(new Impl())
+{
+    Fill::pImpl->method(new FillDup<LinearGradient::Impl>(pImpl));
+}
 
-LinearGradient::LinearGradient() = default;
+
+LinearGradient::~LinearGradient()
+{
+    delete(pImpl);
+}
 
 
 Result LinearGradient::linear(float x1, float y1, float x2, float y2) noexcept
 {
-    return LINEAR(this)->linear(x1, y1, x2, y2);
+    pImpl->x1 = x1;
+    pImpl->y1 = y1;
+    pImpl->x2 = x2;
+    pImpl->y2 = y2;
+
+    return Result::Success;
 }
 
 
 Result LinearGradient::linear(float* x1, float* y1, float* x2, float* y2) const noexcept
 {
-    return CONST_LINEAR(this)->linear(x1, y1, x2, y2);
+    if (x1) *x1 = pImpl->x1;
+    if (x2) *x2 = pImpl->x2;
+    if (y1) *y1 = pImpl->y1;
+    if (y2) *y2 = pImpl->y2;
+
+    return Result::Success;
 }
 
 
-LinearGradient* LinearGradient::gen() noexcept
+unique_ptr<LinearGradient> LinearGradient::gen() noexcept
 {
-    return new LinearGradientImpl;
+    return unique_ptr<LinearGradient>(new LinearGradient);
+}
+
+
+TVG_DEPRECATED uint32_t LinearGradient::identifier() noexcept
+{
+    return (uint32_t) Type::LinearGradient;
 }
 
 

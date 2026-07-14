@@ -40,7 +40,6 @@ class JoltJoint3D;
 class JoltShape3D;
 class JoltSoftBody3D;
 class JoltSpace3D;
-class JoltTempAllocator;
 
 class JoltPhysicsServer3D final : public PhysicsServer3D {
 	GDCLASS(JoltPhysicsServer3D, PhysicsServer3D)
@@ -57,7 +56,6 @@ class JoltPhysicsServer3D final : public PhysicsServer3D {
 	HashSet<JoltSpace3D *> active_spaces;
 
 	JoltJobSystem *job_system = nullptr;
-	JoltTempAllocator *temp_allocator = nullptr;
 
 	bool on_separate_thread = false;
 	bool active = true;

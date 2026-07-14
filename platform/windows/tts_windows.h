@@ -31,14 +31,32 @@
 #pragma once
 
 #include "core/string/ustring.h"
+#include "core/templates/hash_map.h"
+#include "core/templates/list.h"
 #include "core/variant/array.h"
+#include "servers/display/display_server.h"
 
-class TTSDriver;
+#include <objbase.h>
+#include <sapi.h>
+#include <winnls.h>
+#include <cwchar>
 
-struct TTSUtterance;
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
 
 class TTS_Windows {
-	TTSDriver *driver = nullptr;
+	List<DisplayServer::TTSUtterance> queue;
+	ISpVoice *synth = nullptr;
+	bool paused = false;
+	struct UTData {
+		Char16String string;
+		int offset;
+		int64_t id;
+	};
+	HashMap<uint32_t, UTData> ids;
+	bool update_requested = false;
+
+	static void __stdcall speech_event_callback(WPARAM wParam, LPARAM lParam);
 
 	static TTS_Windows *singleton;
 

@@ -31,9 +31,7 @@
 #pragma once
 
 #include "scene/3d/node_3d.h"
-#include "scene/resources/material.h"
 
-class ArrayMesh;
 class CollisionObject3D;
 
 class RayCast3D : public Node3D {

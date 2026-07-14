@@ -55,12 +55,12 @@ ShapeSettings::ShapeResult TaperedCylinderShapeSettings::Create() const
 			settings.mRadius = mTopRadius;
 			settings.mMaterial = mMaterial;
 			settings.mConvexRadius = mConvexRadius;
-			shape = new CylinderShape(settings, mCachedResult);
+			new CylinderShape(settings, mCachedResult);
 		}
 		else
 		{
 			// Normal tapered cylinder shape
-			shape = new TaperedCylinderShape(*this, mCachedResult);
+			new TaperedCylinderShape(*this, mCachedResult);
 		}
 	}
 	return mCachedResult;
@@ -79,7 +79,7 @@ TaperedCylinderShape::TaperedCylinderShape(const TaperedCylinderShapeSettings &i
 	ConvexShape(EShapeSubType::TaperedCylinder, inSettings, outResult),
 	mTopRadius(inSettings.mTopRadius),
 	mBottomRadius(inSettings.mBottomRadius),
-	mConvexRadius(min(inSettings.mConvexRadius, min(inSettings.mTopRadius, inSettings.mBottomRadius)))
+	mConvexRadius(inSettings.mConvexRadius)
 {
 	if (mTopRadius < 0.0f)
 	{
@@ -93,15 +93,27 @@ TaperedCylinderShape::TaperedCylinderShape(const TaperedCylinderShapeSettings &i
 		return;
 	}
 
-	if (mConvexRadius < 0.0f)
+	if (inSettings.mHalfHeight <= 0.0f)
+	{
+		outResult.SetError("Invalid height");
+		return;
+	}
+
+	if (inSettings.mConvexRadius < 0.0f)
 	{
 		outResult.SetError("Invalid convex radius");
 		return;
 	}
 
-	if (inSettings.mHalfHeight <= 0.0f)
+	if (inSettings.mTopRadius < inSettings.mConvexRadius)
 	{
-		outResult.SetError("Invalid height");
+		outResult.SetError("Convex radius must be smaller than convex radius");
+		return;
+	}
+
+	if (inSettings.mBottomRadius < inSettings.mConvexRadius)
+	{
+		outResult.SetError("Convex radius must be smaller than bottom radius");
 		return;
 	}
 

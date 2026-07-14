@@ -32,15 +32,13 @@
 
 #include "../openxr_api.h"
 
-#include "core/object/class_db.h"
-
 OpenXRInteractionProfileMetadata *OpenXRInteractionProfileMetadata::singleton = nullptr;
 
 OpenXRInteractionProfileMetadata::OpenXRInteractionProfileMetadata() {
 	singleton = this;
 
 	_register_core_metadata();
-	OpenXRAPI::register_extension_metadata(this);
+	OpenXRAPI::register_extension_metadata();
 }
 
 OpenXRInteractionProfileMetadata::~OpenXRInteractionProfileMetadata() {

@@ -66,7 +66,6 @@ class EditorSpinSlider : public Range {
 	uint64_t value_input_closed_frame = 0;
 	bool value_input_dirty = false;
 	bool value_input_focus_visible = false;
-	bool deferred_drag_mode = false;
 
 public:
 	enum ControlState {
@@ -138,8 +137,6 @@ public:
 	bool is_flat() const;
 
 	bool is_grabbing() const;
-	void set_deferred_drag_mode_enabled(bool p_enabled = true);
-	bool is_deferred_drag_mode_enabled() const;
 
 	void setup_and_show() { _focus_entered(); }
 	LineEdit *get_line_edit();

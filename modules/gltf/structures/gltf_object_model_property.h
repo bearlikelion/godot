@@ -30,10 +30,9 @@
 
 #pragma once
 
-#include "gltf_accessor.h"
-
 #include "core/math/expression.h"
 #include "core/variant/typed_array.h"
+#include "gltf_accessor.h"
 
 // Object model: https://github.com/KhronosGroup/glTF/blob/main/specification/2.0/ObjectModel.adoc
 // KHR_animation_pointer: https://github.com/KhronosGroup/glTF/tree/main/extensions/2.0/Khronos/KHR_animation_pointer
