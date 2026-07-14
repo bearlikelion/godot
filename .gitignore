@@ -403,3 +403,4 @@ $RECYCLE.BIN/
 .chat-history/
 *.uid
 tmp/
+/webgpu_tests
