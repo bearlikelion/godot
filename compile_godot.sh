@@ -38,6 +38,7 @@ PODMAN_ARCH="x86_64"     # x86_64 | i686 | aarch64 | arm (buildroot SDK arch)
 OSXCROSS_ROOT="${OSXCROSS_ROOT:-}"  # osxcross install root; required (with its target/bin on PATH) for macOS cross-builds
 WEB_NOTHREADS=0          # build the web template with threads=no (no SharedArrayBuffer/COOP+COEP needed)
 WEB_DLINK=0              # build the web template with dlink_enabled=yes (GDExtension support)
+WEBGPU=0                 # build with webgpu=yes (WebGPU rendering driver)
 ENCRYPTION_KEY_FILE=""   # path to a 64-hex-char PCK script encryption key file (e.g. ~/.config/godot/godot.gdkey)
 DEFAULT_ENCRYPTION_KEY_FILE="${XDG_CONFIG_HOME:-$HOME/.config}/godot/godot.gdkey"  # used when neither --encryption-key nor SCRIPT_AES256_ENCRYPTION_KEY is set
 
@@ -66,6 +67,9 @@ Build type (default: --editor):
                           or with --osxcross-sdk, +web when emcc is on PATH)
 
 Options:
+  --webgpu               Build with webgpu=yes (WebGPU rendering driver). Native builds
+                         need a wgpu-native dist at thirdparty/wgpu-native (or set
+                         wgpu_native_dir); see drivers/webgpu/SCsub.
   --lto MODE             Override LTO: none | thin | full
   --no-deprecated        Build with deprecated=no (smaller surface; may break old projects)
   --jobs N               Parallel jobs (default: detected core count)
@@ -221,6 +225,7 @@ while [ $# -gt 0 ]; do
 			LTO="$1" ;;
 		--no-deprecated) NO_DEPRECATED=1 ;;
 		--no-dev-build) DEV_BUILD=0 ;;
+		--webgpu) WEBGPU=1 ;;
 		--jobs)
 			shift; [ $# -gt 0 ] || err "--jobs needs an argument"
 			JOBS="$1" ;;
@@ -298,6 +303,10 @@ build() {
 			"debug_symbols=yes"
 			"separate_debug_symbols=yes"
 		)
+	fi
+
+	if [ "$WEBGPU" -eq 1 ]; then
+		args+=("webgpu=yes")
 	fi
 
 	if [ "$plat" = "web" ]; then
