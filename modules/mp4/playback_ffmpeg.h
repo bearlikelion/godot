@@ -1,5 +1,5 @@
 /**************************************************************************/
-/*  video_stream_mp4.h                                                    */
+/*  playback_ffmpeg.h                                                     */
 /**************************************************************************/
 /*                         This file is part of:                          */
 /*                             GODOT ENGINE                               */
@@ -30,30 +30,61 @@
 
 #pragma once
 
+#include "ffmpeg_symbols.h"
 #include "mp4_playback.h"
 
-#include "core/io/resource_loader.h"
+#include "core/templates/list.h"
 
-class VideoStreamMP4 : public VideoStream {
-	GDCLASS(VideoStreamMP4, VideoStream);
+// MP4 playback decoded by the system FFmpeg libraries, loaded at runtime
+// with dlopen (see ffmpeg_symbols.cpp). Used on Linux/BSD.
+class VideoStreamPlaybackFFmpeg : public VideoStreamPlaybackMP4 {
+	GDCLASS(VideoStreamPlaybackFFmpeg, VideoStreamPlaybackMP4);
+
+	const FFmpegSymbols *ff = nullptr;
+
+	AVIOContext *avio_ctx = nullptr;
+	AVFormatContext *format_ctx = nullptr;
+	AVCodecContext *video_ctx = nullptr;
+	AVCodecContext *audio_ctx = nullptr;
+	SwsContext *sws_ctx = nullptr;
+	SwrContext *swr_ctx = nullptr;
+
+	AVFrame *frame = nullptr;
+	AVFrame *audio_frame = nullptr;
+	AVFrame *pending_frame = nullptr;
+	AVPacket *packet = nullptr;
+
+	List<AVPacket *> video_packets;
+	List<AVPacket *> audio_packets;
+
+	int video_stream_idx = -1;
+	int audio_stream_idx = -1;
+
+	LocalVector<float> resample_buffer;
+
+	bool demux_eof = false;
+	bool video_flushed = false;
+	bool audio_flushed = false;
+
+	static int _io_read(void *p_opaque, uint8_t *p_buf, int p_size);
+	static int64_t _io_seek(void *p_opaque, int64_t p_offset, int p_whence);
+
+	double frame_timestamp(AVFrame *p_frame, AVStream *p_stream) const;
+	bool demux_packet();
+	int receive_decoded_frame(AVCodecContext *p_ctx, List<AVPacket *> &p_queue, bool &r_flushed, AVFrame *p_out);
+	void queue_audio_frame(AVFrame *p_frame);
+	void write_video_frame(AVFrame *p_frame);
+	void flush_packet_queues();
 
 protected:
-	static void _bind_methods();
+	void clear();
 
 public:
-	Ref<VideoStreamPlayback> instantiate_playback() override;
+	virtual Error open_file(const String &p_file) override;
 
-	void set_audio_track(int p_track) override { audio_track = p_track; }
+	virtual void seek(double p_time) override;
+	virtual void update(double p_delta) override;
 
-	VideoStreamMP4() { audio_track = 0; }
-};
-
-class ResourceFormatLoaderMP4 : public ResourceFormatLoader {
-	GDSOFTCLASS(ResourceFormatLoaderMP4, ResourceFormatLoader);
-
-public:
-	virtual Ref<Resource> load(const String &p_path, const String &p_original_path = "", Error *r_error = nullptr, bool p_use_sub_threads = false, float *r_progress = nullptr, CacheMode p_cache_mode = CACHE_MODE_REUSE) override;
-	virtual void get_recognized_extensions(List<String> *p_extensions) const override;
-	virtual bool handles_type(const String &p_type) const override;
-	virtual String get_resource_type(const String &p_path) const override;
+	VideoStreamPlaybackFFmpeg();
+	~VideoStreamPlaybackFFmpeg();
 };

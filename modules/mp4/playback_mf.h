@@ -1,5 +1,5 @@
 /**************************************************************************/
-/*  video_stream_mp4.h                                                    */
+/*  playback_mf.h                                                         */
 /**************************************************************************/
 /*                         This file is part of:                          */
 /*                             GODOT ENGINE                               */
@@ -32,28 +32,43 @@
 
 #include "mp4_playback.h"
 
-#include "core/io/resource_loader.h"
+#include <mfapi.h>
+#include <mfidl.h>
+#include <mfreadwrite.h>
 
-class VideoStreamMP4 : public VideoStream {
-	GDCLASS(VideoStreamMP4, VideoStream);
+class GodotMFByteStream;
+
+// MP4 playback decoded by Windows Media Foundation. The OS ships the H.264/
+// H.265/AAC decoders, so nothing codec-related is compiled into the engine.
+// mfplat.dll/mfreadwrite.dll are loaded dynamically so Windows N editions
+// (no Media Feature Pack) still boot; MP4 playback just reports unavailable.
+class VideoStreamPlaybackMF : public VideoStreamPlaybackMP4 {
+	GDCLASS(VideoStreamPlaybackMF, VideoStreamPlaybackMP4);
+
+	GodotMFByteStream *byte_stream = nullptr;
+	IMFSourceReader *reader = nullptr;
+
+	IMFSample *pending_sample = nullptr;
+
+	int32_t frame_stride = 0;
+
+	bool audio_eos = false;
+	bool video_eos = false;
+
+	double sample_timestamp(IMFSample *p_sample) const;
+	void refresh_video_format();
+	void queue_audio_sample(IMFSample *p_sample);
+	void write_video_sample(IMFSample *p_sample);
 
 protected:
-	static void _bind_methods();
+	void clear();
 
 public:
-	Ref<VideoStreamPlayback> instantiate_playback() override;
+	virtual Error open_file(const String &p_file) override;
 
-	void set_audio_track(int p_track) override { audio_track = p_track; }
+	virtual void seek(double p_time) override;
+	virtual void update(double p_delta) override;
 
-	VideoStreamMP4() { audio_track = 0; }
-};
-
-class ResourceFormatLoaderMP4 : public ResourceFormatLoader {
-	GDSOFTCLASS(ResourceFormatLoaderMP4, ResourceFormatLoader);
-
-public:
-	virtual Ref<Resource> load(const String &p_path, const String &p_original_path = "", Error *r_error = nullptr, bool p_use_sub_threads = false, float *r_progress = nullptr, CacheMode p_cache_mode = CACHE_MODE_REUSE) override;
-	virtual void get_recognized_extensions(List<String> *p_extensions) const override;
-	virtual bool handles_type(const String &p_type) const override;
-	virtual String get_resource_type(const String &p_path) const override;
+	VideoStreamPlaybackMF();
+	~VideoStreamPlaybackMF();
 };

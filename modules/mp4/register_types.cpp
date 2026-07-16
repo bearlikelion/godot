@@ -35,18 +35,12 @@
 #include "core/io/resource_loader.h"
 #include "core/object/class_db.h"
 
-extern "C" {
-#include <libavutil/log.h>
-}
-
 static Ref<ResourceFormatLoaderMP4> resource_loader_mp4;
 
 void initialize_mp4_module(ModuleInitializationLevel p_level) {
 	if (p_level != MODULE_INITIALIZATION_LEVEL_SCENE) {
 		return;
 	}
-	// Demuxer/decoder warnings (e.g. about the custom IO protocol) are noise here.
-	av_log_set_level(AV_LOG_ERROR);
 	resource_loader_mp4.instantiate();
 	ResourceLoader::add_resource_format_loader(resource_loader_mp4, true);
 	GDREGISTER_CLASS(VideoStreamMP4);
