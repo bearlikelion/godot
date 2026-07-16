@@ -1,0 +1,29 @@
+#!/usr/bin/env python
+from misc.utility.scons_hints import *
+
+import os
+import sys
+
+Import("env")
+Import("env_modules")
+
+sys.path.insert(0, Dir(".").srcnode().abspath)
+
+from ffmpeg_detect import find_ffmpeg
+
+env_mp4 = env_modules.Clone()
+
+ffmpeg = find_ffmpeg(env["platform"])
+if ffmpeg is None:
+    print("Error: mp4 module enabled but FFmpeg development libraries were not found.")
+    Exit(255)
+
+# Compile flags only for this module; link flags on the program env.
+env_mp4.MergeFlags(env_mp4.ParseFlags(ffmpeg["CFLAGS"]))
+env.MergeFlags(env.ParseFlags(ffmpeg["LIBFLAGS"]))
+
+module_obj = []
+
+env_mp4.add_source_files(module_obj, "*.cpp")
+
+env.modules_sources += module_obj

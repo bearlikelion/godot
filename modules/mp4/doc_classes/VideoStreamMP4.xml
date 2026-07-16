@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="VideoStreamMP4" inherits="VideoStream" api_type="core" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>
+		[VideoStream] resource for MP4 videos.
+	</brief_description>
+	<description>
+		[VideoStream] resource handling MP4 container files with [code].mp4[/code], [code].m4v[/code] and [code].mov[/code] extensions, decoded on the CPU through FFmpeg. Supported codecs depend on the FFmpeg build linked into the engine (typically H.264/H.265 video and AAC audio).
+		[b]Note:[/b] The H.264 and H.265 codecs are patent-encumbered in some jurisdictions. This module links the system FFmpeg libraries and is only available in custom builds.
+	</description>
+	<tutorials>
+	</tutorials>
+</class>
