@@ -44,11 +44,17 @@ static void cc_signal_handler(int p_sig, siginfo_t *p_info, void *p_ucontext) {
 	void *frames[128];
 	int frame_count = backtrace(frames, 128);
 
+	CrashCatchReport::FaultInfo fault;
+	// si_addr is only meaningful for the memory-fault signals.
+	if (p_info && (p_sig == SIGSEGV || p_sig == SIGBUS || p_sig == SIGILL || p_sig == SIGFPE)) {
+		fault.fault_address = (uint64_t)(uintptr_t)p_info->si_addr;
+	}
+
 	char path[1024];
 	if (build_partial_path_signal_safe(path, sizeof(path))) {
 		int fd = open(path, O_WRONLY | O_CREAT | O_TRUNC, 0600);
 		if (fd >= 0) {
-			CrashCatchReport::write_partial_signal_safe(fd, p_sig, frames, frame_count);
+			CrashCatchReport::write_partial_signal_safe(fd, p_sig, frames, frame_count, &fault);
 			close(fd);
 		}
 	}
@@ -125,15 +131,63 @@ static LPTOP_LEVEL_EXCEPTION_FILTER s_old_filter = nullptr;
 
 static LONG WINAPI cc_exception_filter(EXCEPTION_POINTERS *p_exception) {
 	void *frames[128];
-	// RtlCaptureStackBackTrace is safe to call here and uses the current context.
-	USHORT frame_count = RtlCaptureStackBackTrace(0, 128, frames, nullptr);
+	USHORT frame_count = 0;
+
+	// Walk the faulting thread's real stack via ContextRecord. A bare
+	// RtlCaptureStackBackTrace here would instead walk this filter's own stack,
+	// which starts several frames above the fault and loses the frames that
+	// matter. RtlVirtualUnwind is the documented x64 table-driven unwinder and
+	// touches no locks, so it is safe on the crashing path.
+#if defined(_M_X64) || defined(__x86_64__)
+	CONTEXT ctx = *p_exception->ContextRecord;
+	while (frame_count < 128 && ctx.Rip) {
+		frames[frame_count++] = (void *)(uintptr_t)ctx.Rip;
+
+		DWORD64 image_base = 0;
+		PRUNTIME_FUNCTION rf = RtlLookupFunctionEntry(ctx.Rip, &image_base, nullptr);
+		if (!rf) {
+			// Leaf function: return address sits at RSP. Probe first, since a
+			// corrupt RSP here would fault inside the handler and lose the
+			// whole report.
+			if (!ctx.Rsp || IsBadReadPtr((const void *)ctx.Rsp, sizeof(DWORD64))) {
+				break;
+			}
+			ctx.Rip = *(DWORD64 *)ctx.Rsp;
+			ctx.Rsp += 8;
+			continue;
+		}
+		PVOID handler_data = nullptr;
+		DWORD64 establisher_frame = 0;
+		DWORD64 prev_rip = ctx.Rip;
+		RtlVirtualUnwind(UNW_FLAG_NHANDLER, image_base, ctx.Rip, rf, &ctx, &handler_data, &establisher_frame, nullptr);
+		if (ctx.Rip == prev_rip) {
+			break; // No forward progress; stop rather than spin.
+		}
+	}
+#endif
+	if (frame_count == 0) {
+		// Fall back to the filter's own stack rather than emitting nothing.
+		frame_count = RtlCaptureStackBackTrace(0, 128, frames, nullptr);
+	}
+
+	const EXCEPTION_RECORD *rec = p_exception->ExceptionRecord;
+	CrashCatchReport::FaultInfo fault;
+	fault.fault_pc = (uint64_t)(uintptr_t)rec->ExceptionAddress;
+	// For AV and page errors ExceptionInformation[0] is the access type
+	// (0 read / 1 write / 8 DEP) and [1] the address touched.
+	if ((rec->ExceptionCode == EXCEPTION_ACCESS_VIOLATION ||
+				rec->ExceptionCode == EXCEPTION_IN_PAGE_ERROR) &&
+			rec->NumberParameters >= 2) {
+		fault.access_type = (int)rec->ExceptionInformation[0];
+		fault.fault_address = (uint64_t)rec->ExceptionInformation[1];
+	}
 
 	char path[1024];
 	if (build_partial_path_signal_safe(path, sizeof(path))) {
 		// Use a CRT fd so the report writer's write()-based path works unchanged.
 		int fd = _open(path, _O_WRONLY | _O_CREAT | _O_TRUNC | _O_BINARY, _S_IREAD | _S_IWRITE);
 		if (fd >= 0) {
-			CrashCatchReport::write_partial_signal_safe(fd, (int)p_exception->ExceptionRecord->ExceptionCode, frames, (int)frame_count);
+			CrashCatchReport::write_partial_signal_safe(fd, (int)rec->ExceptionCode, frames, (int)frame_count, &fault);
 			_close(fd);
 		}
 	}

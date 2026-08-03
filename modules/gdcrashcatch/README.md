@@ -16,8 +16,41 @@ engine's own debug-build backtrace.
   promoted to a full JSON report (log tail, system info) on the next launch.
 - Deferred, consent-gated upload to a private endpoint using the low-level `HTTPClient`.
 - GNU Build ID captured per build for server-side symbolication.
+- Module load base recorded on all three platforms so absolute frame addresses can be
+  rebased against the debug symbols.
+- Fault detail (`fault_pc`, `fault_address`, `fault_access`) captured where the platform
+  provides it.
 - GDScript singleton `CrashCatch` with a test API (`crash_here()`, `crash_with_signal()`,
   `crash_via_abort()`, and the non-crashing `force_write_test_report()`).
+
+## Symbolicating a report
+
+Frames in `native_frames` are absolute runtime addresses. In every case subtract
+`load_base` to get the address the debug symbols use:
+
+```
+file_addr = frame - load_base
+```
+
+`load_base_kind` records what was subtracted. On Linux and macOS (`"slide"`) it is the
+relocation slide, so the result is a module-relative offset. On Windows (`"image_base"`)
+it is the absolute image base reported by `GetModuleHandleW(nullptr)`, so the result still
+carries the PE preferred base (`0x140000000` on x86_64) and lands directly in the section
+VMAs that `objdump -h` shows. Do not add the preferred base a second time.
+
+Frames outside the main module (system DLLs, libc) will not resolve; grouping addresses by
+their high bits separates them from game frames. Godot's Windows builds are MinGW-built and
+carry DWARF, so the GNU tools work directly, with no PDB involved:
+
+```
+addr2line -e godot.windows.template_release.x86_64.exe.debugsymbols -f -C -i <file_addr>
+```
+
+Pass every address in one invocation; the debug info is large and each run reloads it.
+
+`signal` holds a POSIX signal number when `signal_kind` is `posix_signal`, and an NTSTATUS
+exception code (e.g. `0xC0000005` as the signed int `-1073741819`) when it is
+`nt_exception`.
 
 ## Install
 
@@ -30,11 +63,11 @@ submodule) and rebuild the engine.
 - `crash_catch/upload/enabled` (bool, default false)
 - `crash_catch/upload/require_consent` (bool, default true)
 - `crash_catch/upload/url` (string)
-- `crash_catch/upload/secret` (string) — shared secret header for the private analyzer
+- `crash_catch/upload/secret` (string): shared secret header for the private analyzer
 - `crash_catch/report/app_version` (string)
 - `crash_catch/report/log_tail_lines` (int, default 200)
-- `crash_catch/manual/zip_reports` (bool, default true) — bundle each report into a sendable `.zip`
-- `crash_catch/manual/contact` (string) — email/URL shown in the zip's `READ_ME.txt`
+- `crash_catch/manual/zip_reports` (bool, default true): bundle each report into a sendable `.zip`
+- `crash_catch/manual/contact` (string): email/URL shown in the zip's `READ_ME.txt`
 - `crash_catch/debug/enable_test_api` (bool, default false)
 
 ## Manual send

@@ -32,7 +32,7 @@
 
 #include "core/object/class_db.h"
 
-#if defined(LINUXBSD_ENABLED)
+#if defined(MP4_FFMPEG_STATIC) || defined(LINUXBSD_ENABLED)
 #include "playback_ffmpeg.h"
 #elif defined(WINDOWS_ENABLED)
 #include "playback_mf.h"
@@ -42,7 +42,7 @@ void VideoStreamMP4::_bind_methods() {}
 
 Ref<VideoStreamPlayback> VideoStreamMP4::instantiate_playback() {
 	Ref<VideoStreamPlaybackMP4> pb;
-#if defined(LINUXBSD_ENABLED)
+#if defined(MP4_FFMPEG_STATIC) || defined(LINUXBSD_ENABLED)
 	pb = Ref<VideoStreamPlaybackMP4>(memnew(VideoStreamPlaybackFFmpeg));
 #elif defined(WINDOWS_ENABLED)
 	pb = Ref<VideoStreamPlaybackMP4>(memnew(VideoStreamPlaybackMF));

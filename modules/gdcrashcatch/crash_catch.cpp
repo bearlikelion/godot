@@ -94,6 +94,8 @@ void CrashCatch::_on_engine_crash_notification() {
 	// it for the next-launch promotion to pick up.
 	// (Defined in crash_catch_report.cpp; kept out of the raw signal path.)
 	CrashCatchReport::set_pending_script_backtrace(String());
+	// Copy the log now: by the next launch the engine's logger has rotated it.
+	CrashCatchReport::snapshot_log();
 }
 
 // ----------------------------------------------------------------------------

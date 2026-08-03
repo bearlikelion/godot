@@ -32,9 +32,17 @@ public:
 	// Ensures the report directory exists. Returns false on failure.
 	static bool ensure_report_dir();
 
+	// Extra fault detail the platform handler can supply. All-zero when the
+	// platform gives us nothing (POSIX signals other than SIGSEGV/SIGBUS).
+	struct FaultInfo {
+		uint64_t fault_pc = 0; // Faulting instruction pointer.
+		uint64_t fault_address = 0; // Data address that was accessed.
+		int access_type = -1; // 0 read, 1 write, 8 execute (DEP); -1 unknown.
+	};
+
 	// Phase 1: called from the crash handler. p_fd is a file descriptor opened at
 	// init time. Writes raw addresses + cached metadata. Must stay signal-safe.
-	static void write_partial_signal_safe(int p_fd, int p_signal, void *const *p_frames, int p_frame_count);
+	static void write_partial_signal_safe(int p_fd, int p_signal, void *const *p_frames, int p_frame_count, const FaultInfo *p_fault = nullptr);
 
 	// Phase 2: scan the report dir for *.partial, build full JSON *.json reports,
 	// then delete the consumed .partial files. Returns the list of json paths
@@ -58,6 +66,12 @@ public:
 	// next-launch promotion can fold it into the matching report. Safe-ish: called
 	// from the notification path, not a raw signal.
 	static void set_pending_script_backtrace(const String &p_text);
+
+	// Copy the current log to user://crash_reports/pending.log while the crashing
+	// process is still alive. Promotion runs on the NEXT launch, by which point
+	// the engine's RotatedFileLogger has already truncated or rotated the live
+	// log, so reading it then yields nothing. Called from NOTIFICATION_CRASH.
+	static void snapshot_log();
 };
 
 #endif // CRASH_CATCH_REPORT_H

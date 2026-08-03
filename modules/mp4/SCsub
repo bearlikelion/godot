@@ -1,6 +1,8 @@
 #!/usr/bin/env python
 from misc.utility.scons_hints import *
 
+import os
+
 Import("env")
 Import("env_modules")
 
@@ -14,7 +16,34 @@ sources = [
     "mp4_playback.cpp",
 ]
 
-if env["platform"] == "linuxbsd":
+# When a static decode-only FFmpeg build is present under thirdparty/ffmpeg,
+# link it directly on Linux and Windows: playback is then always available and
+# needs no system libraries. Without it the old backends apply: dlopen'd system
+# FFmpeg on Linux, Media Foundation on Windows.
+ffmpeg_static_dirs = {
+    "linuxbsd": "#thirdparty/ffmpeg/lib-linuxbsd-x86_64",
+    "windows": "#thirdparty/ffmpeg/lib-windows-x86_64",
+}
+ffmpeg_static_dir = ffmpeg_static_dirs.get(env["platform"])
+ffmpeg_static = (
+    ffmpeg_static_dir is not None
+    and env["arch"] == "x86_64"
+    and os.path.isfile(env.Dir(ffmpeg_static_dir).abspath + "/libavcodec.a")
+)
+
+if ffmpeg_static:
+    env_mp4.Prepend(CPPPATH=["#thirdparty/ffmpeg/include"])
+    env_mp4.Append(CPPDEFINES=["MP4_FFMPEG_STATIC"])
+    sources += [
+        "ffmpeg_symbols.cpp",
+        "playback_ffmpeg.cpp",
+    ]
+    env.Append(LIBPATH=[ffmpeg_static_dir])
+    env.Append(LIBS=["avformat", "avcodec", "swscale", "swresample", "avutil"])
+    if env["platform"] == "windows":
+        # avutil's random number sources use bcrypt on Windows.
+        env.Append(LIBS=["bcrypt"])
+elif env["platform"] == "linuxbsd":
     # FFmpeg backend: compiled against vendored headers, loaded at runtime with
     # dlopen, so there is no link-time FFmpeg dependency.
     env_mp4.Prepend(CPPPATH=["#thirdparty/ffmpeg/include"])

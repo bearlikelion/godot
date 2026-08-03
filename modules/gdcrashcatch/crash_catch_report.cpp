@@ -32,6 +32,14 @@
 #include <link.h>
 #endif
 
+#if defined(WINDOWS_ENABLED) || defined(_WIN32)
+#include <windows.h>
+#endif
+
+#if defined(__APPLE__)
+#include <mach-o/dyld.h>
+#endif
+
 // ---------------------------------------------------------------------------
 // Cached metadata (filled at init while engine calls are safe, then read from
 // the signal handler as raw bytes).
@@ -140,6 +148,15 @@ void CrashCatchReport::cache_static_metadata() {
 #if defined(__linux__) && defined(__GLIBC__)
 	// Same relocation the engine's crash handler uses (crash_handler_linuxbsd.cpp).
 	s_load_base = (uint64_t)_r_debug.r_map->l_addr;
+#elif defined(WINDOWS_ENABLED) || defined(_WIN32)
+	// ASLR-randomized image base. Frames are absolute, so the symbolicator needs
+	// this to rebase them. frame - load_base yields an address that still
+	// includes the PE preferred base (0x140000000 on x86_64), which is exactly
+	// what the section VMAs in the debug info use.
+	s_load_base = (uint64_t)(uintptr_t)GetModuleHandleW(nullptr);
+#elif defined(__APPLE__)
+	// Slide relative to the Mach-O preferred base; image 0 is the main executable.
+	s_load_base = (uint64_t)_dyld_get_image_vmaddr_slide(0);
 #endif
 	cc_copy_cstr(s_engine_version, sizeof(s_engine_version), String(GODOT_VERSION_FULL_NAME));
 	cc_copy_cstr(s_app_version, sizeof(s_app_version), CrashCatchProjectSettings::get_app_version());
@@ -208,7 +225,7 @@ static void cc_write_i64(int fd, int64_t v) {
 
 // The partial format is a tiny line-based text record (NOT JSON), chosen so the
 // writer can stay async-signal-safe. The next-launch promotion step parses it.
-void CrashCatchReport::write_partial_signal_safe(int p_fd, int p_signal, void *const *p_frames, int p_frame_count) {
+void CrashCatchReport::write_partial_signal_safe(int p_fd, int p_signal, void *const *p_frames, int p_frame_count, const FaultInfo *p_fault) {
 	cc_write_str(p_fd, "CCPARTIAL1\n");
 	cc_write_str(p_fd, "build_id=");
 	cc_write_str(p_fd, s_build_id);
@@ -220,10 +237,34 @@ void CrashCatchReport::write_partial_signal_safe(int p_fd, int p_signal, void *c
 	cc_write_str(p_fd, s_platform);
 	cc_write_str(p_fd, "\nsignal=");
 	cc_write_i64(p_fd, p_signal);
+	// Windows reports an NTSTATUS exception code here, POSIX a signal number.
+	// Without this the two namespaces are indistinguishable in the JSON.
+	cc_write_str(p_fd, "\nsignal_kind=");
+#if defined(WINDOWS_ENABLED) || defined(_WIN32)
+	cc_write_str(p_fd, "nt_exception");
+#else
+	cc_write_str(p_fd, "posix_signal");
+#endif
 	cc_write_str(p_fd, "\nstatic_memory=");
 	cc_write_i64(p_fd, (int64_t)s_static_memory_at_init);
 	cc_write_str(p_fd, "\nload_base=");
 	cc_write_u64_hex(p_fd, s_load_base);
+	// How to interpret load_base: on Windows it is the absolute image base, on
+	// Linux/macOS a relocation delta to subtract from each frame.
+	cc_write_str(p_fd, "\nload_base_kind=");
+#if defined(WINDOWS_ENABLED) || defined(_WIN32)
+	cc_write_str(p_fd, "image_base");
+#else
+	cc_write_str(p_fd, "slide");
+#endif
+	if (p_fault) {
+		cc_write_str(p_fd, "\nfault_pc=");
+		cc_write_u64_hex(p_fd, p_fault->fault_pc);
+		cc_write_str(p_fd, "\nfault_address=");
+		cc_write_u64_hex(p_fd, p_fault->fault_address);
+		cc_write_str(p_fd, "\nfault_access=");
+		cc_write_i64(p_fd, p_fault->access_type);
+	}
 	cc_write_str(p_fd, "\nframes=");
 	cc_write_i64(p_fd, p_frame_count);
 	cc_write_str(p_fd, "\n");
@@ -239,16 +280,59 @@ void CrashCatchReport::write_partial_signal_safe(int p_fd, int p_signal, void *c
 // Phase 2: promotion + enrichment (safe context)
 // ---------------------------------------------------------------------------
 
-static String cc_read_log_tail(int p_lines) {
-	if (p_lines <= 0) {
-		return String();
+// Snapshot written at crash time; see CrashCatchReport::snapshot_log().
+static const char *CC_LOG_SNAPSHOT_GLOBAL = "user://crash_reports/pending.log";
+
+// Resolves to the crash-time snapshot when one exists, else the live log.
+static String cc_resolve_log_path() {
+	if (FileAccess::exists(CC_LOG_SNAPSHOT_GLOBAL)) {
+		return CC_LOG_SNAPSHOT_GLOBAL;
 	}
 	String log_path = GLOBAL_GET("debug/file_logging/log_path");
 	if (log_path.is_empty()) {
 		return String();
 	}
+	return OS::get_singleton()->expand_path(log_path);
+}
+
+void CrashCatchReport::snapshot_log() {
+	String log_path = GLOBAL_GET("debug/file_logging/log_path");
+	if (log_path.is_empty()) {
+		return;
+	}
 	String full = OS::get_singleton()->expand_path(log_path);
 	if (!FileAccess::exists(full)) {
+		return;
+	}
+	Ref<FileAccess> src = FileAccess::open(full, FileAccess::READ);
+	if (src.is_null()) {
+		return;
+	}
+	if (!ensure_report_dir()) {
+		return;
+	}
+	Ref<FileAccess> dst = FileAccess::open(CC_LOG_SNAPSHOT_GLOBAL, FileAccess::WRITE);
+	if (dst.is_null()) {
+		return;
+	}
+	// Bounded copy: the log can be large and we are on the crashing path.
+	const uint64_t CC_MAX_SNAPSHOT = 1 << 20; // 1 MiB
+	uint64_t len = src->get_length();
+	if (len > CC_MAX_SNAPSHOT) {
+		src->seek(len - CC_MAX_SNAPSHOT); // Keep the tail, that's where the crash is.
+	}
+	Vector<uint8_t> buf = src->get_buffer(MIN(len, CC_MAX_SNAPSHOT));
+	if (buf.size() > 0) {
+		dst->store_buffer(buf.ptr(), buf.size());
+	}
+}
+
+static String cc_read_log_tail(int p_lines) {
+	if (p_lines <= 0) {
+		return String();
+	}
+	String full = cc_resolve_log_path();
+	if (full.is_empty() || !FileAccess::exists(full)) {
 		return String();
 	}
 	Ref<FileAccess> f = FileAccess::open(full, FileAccess::READ);
@@ -296,7 +380,7 @@ static Dictionary cc_parse_partial(const String &p_text) {
 		String val = line.substr(eq + 1);
 		if (key == "frame") {
 			frames.push_back(val);
-		} else if (key == "signal" || key == "static_memory" || key == "frames") {
+		} else if (key == "signal" || key == "static_memory" || key == "frames" || key == "fault_access") {
 			d[key] = val.to_int();
 		} else {
 			d[key] = val;
@@ -364,6 +448,11 @@ Vector<String> CrashCatchReport::promote_partials() {
 	}
 
 	s_pending_script_backtrace = String();
+	// Drop the snapshot once consumed, so a later crash cannot inherit the log
+	// from this one.
+	if (!partials.is_empty() && FileAccess::exists(CC_LOG_SNAPSHOT_GLOBAL)) {
+		da->remove(String(CC_LOG_SNAPSHOT_GLOBAL).get_file());
+	}
 	return produced;
 }
 
@@ -421,19 +510,16 @@ String CrashCatchReport::zip_report(const String &p_report_json_path) {
 		}
 	}
 
-	// 2) A copy of the current/last log file, if available.
+	// 2) The crash-time log snapshot, falling back to the live log.
 	{
-		String log_path = GLOBAL_GET("debug/file_logging/log_path");
-		if (!log_path.is_empty()) {
-			String full = OS::get_singleton()->expand_path(log_path);
-			if (FileAccess::exists(full)) {
-				Ref<FileAccess> lf = FileAccess::open(full, FileAccess::READ);
-				if (lf.is_valid()) {
-					Vector<uint8_t> data = lf->get_buffer(lf->get_length());
-					zip->start_file(full.get_file());
-					zip->write_file(data);
-					zip->close_file();
-				}
+		String full = cc_resolve_log_path();
+		if (!full.is_empty() && FileAccess::exists(full)) {
+			Ref<FileAccess> lf = FileAccess::open(full, FileAccess::READ);
+			if (lf.is_valid()) {
+				Vector<uint8_t> data = lf->get_buffer(lf->get_length());
+				zip->start_file(full.get_file());
+				zip->write_file(data);
+				zip->close_file();
 			}
 		}
 	}

@@ -34,6 +34,29 @@
 #include "core/string/print_string.h"
 #include "core/variant/variant.h"
 
+#ifdef MP4_FFMPEG_STATIC
+
+// FFmpeg is linked statically into the binary; the symbol table just points
+// at the real functions, so playback is always available.
+const FFmpegSymbols *ffmpeg_symbols() {
+	static Mutex mutex;
+	static FFmpegSymbols symbols;
+	static bool initialized = false;
+
+	MutexLock lock(mutex);
+	if (!initialized) {
+		initialized = true;
+#define FFMPEG_ASSIGN_SYMBOL(m_name) symbols.m_name = &::m_name;
+		FFMPEG_SYMBOLS(FFMPEG_ASSIGN_SYMBOL)
+#undef FFMPEG_ASSIGN_SYMBOL
+		// Demuxer/decoder warnings (e.g. about the custom IO protocol) are noise here.
+		symbols.av_log_set_level(AV_LOG_ERROR);
+	}
+	return &symbols;
+}
+
+#else // dlopen the system libraries at runtime
+
 #include <dlfcn.h>
 #include <stdio.h>
 
@@ -138,3 +161,5 @@ const FFmpegSymbols *ffmpeg_symbols() {
 	}
 	return available ? &symbols : nullptr;
 }
+
+#endif // MP4_FFMPEG_STATIC

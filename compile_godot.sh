@@ -31,10 +31,16 @@ ALL_TEMPLATES=0
 JOBS=""
 UPLOAD_SYMBOLS_URL=""
 MACOS_ARCH="universal"   # universal | arm64 | x86_64 (osxcross cross-builds only)
-OSXCROSS_SDK=""          # e.g. darwin24.4; required when cross-compiling macOS
+OSXCROSS_SDK="${OSXCROSS_SDK:-}"     # e.g. darwin24.4; required when cross-compiling macOS. The
+                                     # osxcross toolchain image exports it, so a build running
+                                     # inside that image (CI `container:`) needs no flag.
 USE_PODMAN=0             # build linux inside the old-glibc buildroot container
 PODMAN_IMAGE="localhost/godot-linux:4.7-f43"
 PODMAN_ARCH="x86_64"     # x86_64 | i686 | aarch64 | arm (buildroot SDK arch)
+MACOS_PODMAN_IMAGE="localhost/godot-macos:osxcross"  # osxcross toolchain image; see build_container.sh in the osxcross checkout
+MACOS_VULKAN_SDK_PATH="${OSXCROSS_VULKAN_SDK_PATH:-}"  # MoltenVK location; set by the osxcross image, or read back out of it under --podman
+MACOS_CONTAINER_RESOLVED=0           # guard so the image is only interrogated once per run
+OSXCROSS_LINKER="lld"    # linker for osxcross cross-builds; "ld64" opts back out (see build())
 OSXCROSS_ROOT="${OSXCROSS_ROOT:-}"  # osxcross install root; required (with its target/bin on PATH) for macOS cross-builds
 WEB_NOTHREADS=0          # build the web template with threads=no (no SharedArrayBuffer/COOP+COEP needed)
 WEB_DLINK=0              # build the web template with dlink_enabled=yes (GDExtension support)
@@ -93,15 +99,30 @@ Options:
   --web-dlink            Web only: build with dlink_enabled=yes for GDExtension support
                          (bigger and slower template; matches the "dlink" official variant).
   --osxcross-sdk SDK     osxcross SDK/toolchain id (e.g. darwin24.4) for cross-compiling
-                         macOS from Linux. Requires osxcross's target/bin on PATH.
+                         macOS from Linux. Requires osxcross's target/bin on PATH. Not
+                         needed with --macos --podman: the value is read back out of the
+                         toolchain image, which knows which SDK it was built against.
   --macos-arch ARCH      universal | arm64 | x86_64 (default: universal) for macOS builds.
-  --podman               Build linux (platform=linuxbsd) inside the godot-linux buildroot
-                          container (GCC, glibc 2.28 baseline) instead of the host
-                          toolchain, so the resulting binary runs on older glibc systems
-                          (e.g. Steam Deck). Requires the godot-linux:4.7-f43 image; see
-                          build-containers/build.sh in the godotengine/build-containers repo.
-  --podman-image IMG     Override the container image (default: localhost/godot-linux:4.7-f43)
+  --osxcross-linker LD   Linker for macOS cross-builds (default: lld). osxcross pins
+                         cctools' ld64 at version 711, the last Apple open-sourced, which
+                         cannot synthesise the ObjC selector stubs clang >= 14 emits for
+                         arm64 - a stock cross-link fails with hundreds of undefined
+                         _objc_msgSend$... symbols. Pass "ld64" to use osxcross's linker
+                         anyway (expect that failure on any ObjC-heavy target).
+  --podman               Build inside a container instead of with the host toolchain.
+                          For --linux (platform=linuxbsd) that is the godot-linux
+                          buildroot image (GCC, glibc 2.28 baseline), so the binary runs
+                          on older glibc systems (e.g. Steam Deck); requires the
+                          godot-linux:4.7-f43 image, see build-containers/build.sh in the
+                          godotengine/build-containers repo.
+                          For --macos it is the osxcross toolchain image, which is how you
+                          cross-compile macOS on a Linux CI box; build it by running
+                          ./build_container.sh in the osxcross checkout.
+  --podman-image IMG     Override the linux container image (default: localhost/godot-linux:4.7-f43)
   --podman-arch ARCH     x86_64 | i686 | aarch64 | arm (default: x86_64)
+  --macos-podman-image IMG
+                         Override the osxcross container image
+                         (default: localhost/godot-macos:osxcross)
   --clean                scons --clean for the selected target, then exit
   -h, --help             Show this help
 
@@ -191,6 +212,23 @@ check_toolchain() {
 
 	if [ "$plat" = "macos" ] && [ "$host" != "macos" ]; then
 		[ -n "$OSXCROSS_SDK" ] || err "cross-compiling macOS from $host needs --osxcross-sdk (e.g. darwin24.4)"
+
+		# The osxcross toolchain is usually not on PATH in a fresh shell, so look for it in
+		# the usual install roots before giving up. Without this the OSXCROSS_ROOT fallback
+		# below can never run, since it derives the root from a clang already on PATH.
+		if ! command -v "x86_64-apple-${OSXCROSS_SDK}-clang" >/dev/null 2>&1; then
+			local candidate
+			for candidate in "$OSXCROSS_ROOT" "$HOME/Source/osxcross" "$HOME/osxcross" /opt/osxcross /usr/local/osxcross; do
+				[ -n "$candidate" ] || continue
+				if [ -x "$candidate/target/bin/x86_64-apple-${OSXCROSS_SDK}-clang" ]; then
+					PATH="$candidate/target/bin:$PATH"
+					export PATH
+					echo ">>> using osxcross toolchain at $candidate/target/bin" >&2
+					break
+				fi
+			done
+		fi
+
 		command -v "x86_64-apple-${OSXCROSS_SDK}-clang" >/dev/null 2>&1 ||
 			err "osxcross toolchain for sdk '$OSXCROSS_SDK' not found on PATH (expected x86_64-apple-${OSXCROSS_SDK}-clang)"
 		if [ -z "$OSXCROSS_ROOT" ]; then
@@ -241,10 +279,16 @@ while [ $# -gt 0 ]; do
 		--macos-arch)
 			shift; [ $# -gt 0 ] || err "--macos-arch needs an argument"
 			MACOS_ARCH="$1" ;;
+		--osxcross-linker)
+			shift; [ $# -gt 0 ] || err "--osxcross-linker needs an argument"
+			OSXCROSS_LINKER="$1" ;;
 		--podman) USE_PODMAN=1 ;;
 		--podman-image)
 			shift; [ $# -gt 0 ] || err "--podman-image needs an argument"
 			PODMAN_IMAGE="$1" ;;
+		--macos-podman-image)
+			shift; [ $# -gt 0 ] || err "--macos-podman-image needs an argument"
+			MACOS_PODMAN_IMAGE="$1" ;;
 		--podman-arch)
 			shift; [ $# -gt 0 ] || err "--podman-arch needs an argument"
 			PODMAN_ARCH="$1" ;;
@@ -270,6 +314,12 @@ build() {
 	local btype="$2"
 	local arch_override="${3:-}"
 
+	# Interrogate the osxcross image before the universal split below, so both arch
+	# passes and the lipo step see the same resolved toolchain.
+	if [ "$plat" = "macos" ] && [ "$USE_PODMAN" -eq 1 ]; then
+		resolve_macos_container_env
+	fi
+
 	# macOS has no scons arch=universal; build arm64 + x86_64 separately and lipo them.
 	if [ "$plat" = "macos" ] && [ "$MACOS_ARCH" = "universal" ] && [ -z "$arch_override" ]; then
 		build "$plat" "$btype" "arm64"
@@ -283,7 +333,7 @@ build() {
 	fi
 
 	local use_podman=0
-	if [ "$plat" = "linuxbsd" ] && [ "$USE_PODMAN" -eq 1 ]; then
+	if [ "$USE_PODMAN" -eq 1 ] && { [ "$plat" = "linuxbsd" ] || [ "$plat" = "macos" ]; }; then
 		use_podman=1
 	else
 		check_toolchain "$plat"
@@ -322,10 +372,28 @@ build() {
 		args+=("arch=${arch_override:-$MACOS_ARCH}")
 		if [ -n "$OSXCROSS_SDK" ]; then
 			args+=("osxcross_sdk=$OSXCROSS_SDK")
+
+			# osxcross pins cctools' ld64 at LINKER_VERSION=711, the last version Apple
+			# open-sourced (Xcode 12). It cannot synthesise the ObjC selector stubs
+			# (_objc_msgSend$foo) that clang >= 14 emits for arm64, so a stock cross-link
+			# of an ObjC-heavy target like Godot ends in hundreds of undefined
+			# _objc_msgSend$... symbols. Stub support landed in ld64-820/Xcode 14, which
+			# was never released as source, so cctools-port will not gain it - LLVM's
+			# ld64.lld is the fix, not a workaround. --osxcross-linker ld64 opts out.
+			if [ "$OSXCROSS_LINKER" != "ld64" ]; then
+				args+=("linkflags=-fuse-ld=$OSXCROSS_LINKER")
+			fi
+		fi
+		# Godot disables the Metal driver for non-arm64, so the x86_64 slice needs Vulkan
+		# via MoltenVK. LunarG's macOS SDK installer does not run on Linux; the osxcross
+		# image bundles the MoltenVK xcframework instead and reports where it put it.
+		if [ -n "$MACOS_VULKAN_SDK_PATH" ]; then
+			args+=("vulkan_sdk_path=$MACOS_VULKAN_SDK_PATH")
 		fi
 	fi
 
-	if [ "$use_podman" -eq 1 ]; then
+	# The buildroot SDK is per-arch; the osxcross image already got its arch above.
+	if [ "$use_podman" -eq 1 ] && [ "$plat" = "linuxbsd" ]; then
 		args+=("arch=$PODMAN_ARCH")
 	fi
 
@@ -380,7 +448,9 @@ build() {
 		args+=("--clean")
 	fi
 
-	if [ "$use_podman" -eq 1 ]; then
+	if [ "$use_podman" -eq 1 ] && [ "$plat" = "macos" ]; then
+		run_podman_macos_scons "${args[@]}"
+	elif [ "$use_podman" -eq 1 ]; then
 		run_podman_scons "${args[@]}"
 	else
 		echo ">>> scons ${args[*]}"
@@ -452,8 +522,6 @@ lipo_macos_universal() {
 		*) err "internal: unknown build type '$btype'" ;;
 	esac
 
-	command -v lipo >/dev/null 2>&1 || err "lipo not found on PATH (expected from osxcross)"
-
 	local arm64_bin="bin/godot.macos.${target_suffix}.arm64"
 	local x86_64_bin="bin/godot.macos.${target_suffix}.x86_64"
 	local universal_bin="bin/godot.macos.${target_suffix}.universal"
@@ -462,9 +530,26 @@ lipo_macos_universal() {
 	[ -f "$x86_64_bin" ] || err "expected x86_64 binary not found: $x86_64_bin"
 
 	echo ">>> lipo -create $arm64_bin $x86_64_bin -output $universal_bin"
-	lipo -create "$arm64_bin" "$x86_64_bin" -output "$universal_bin"
+	run_lipo -create "$arm64_bin" "$x86_64_bin" -output "$universal_bin"
 	echo ">>> universal binary: $universal_bin"
-	lipo -info "$universal_bin"
+	run_lipo -info "$universal_bin"
+}
+
+# lipo is a Mach-O tool: on a mac it is the system one, on a Linux host it comes from
+# osxcross (build.sh symlinks target/bin/lipo), and under --podman it only exists inside
+# the toolchain image. Paths are repo-relative, and the image mounts the repo at the same
+# working directory, so the arguments carry over unchanged.
+run_lipo() {
+	if [ "$USE_PODMAN" -eq 1 ]; then
+		podman run --rm \
+			-v "$(pwd)":/root/godot:z \
+			-w /root/godot \
+			"$MACOS_PODMAN_IMAGE" \
+			lipo "$@"
+	else
+		command -v lipo >/dev/null 2>&1 || err "lipo not found on PATH (expected from osxcross)"
+		lipo "$@"
+	fi
 }
 
 # Run a scons build inside the godot-linux buildroot container (GCC, old glibc baseline)
@@ -495,6 +580,61 @@ run_podman_scons() {
 		"${podman_env[@]}" \
 		"$PODMAN_IMAGE" \
 		bash -c "export PATH=\"/root/${sdk_dir}/bin:\$PATH\" && scons $(printf '%q ' "$@")"
+}
+
+# Read the toolchain triple and the bundled MoltenVK path back out of the osxcross image.
+# The image was built against one specific macOS SDK and its wrappers are named after the
+# matching triple (arm64-apple-darwin24.4-cc and friends), so asking it beats making the
+# caller repeat a value that is already fixed at image build time.
+resolve_macos_container_env() {
+	[ "$MACOS_CONTAINER_RESOLVED" -eq 1 ] && return
+	MACOS_CONTAINER_RESOLVED=1
+
+	command -v podman >/dev/null 2>&1 || err "podman not found on PATH"
+	podman image exists "$MACOS_PODMAN_IMAGE" ||
+		err "podman image '$MACOS_PODMAN_IMAGE' not found; build it by running ./build_container.sh in the osxcross checkout"
+
+	local probe sdk mvk
+	probe="$(podman run --rm "$MACOS_PODMAN_IMAGE" \
+		sh -c 'printf "%s\n%s\n" "${OSXCROSS_SDK:-}" "${OSXCROSS_VULKAN_SDK_PATH:-}"')" ||
+		err "cannot run '$MACOS_PODMAN_IMAGE'"
+	sdk="$(printf '%s' "$probe" | sed -n '1p')"
+	mvk="$(printf '%s' "$probe" | sed -n '2p')"
+
+	[ -n "$sdk" ] ||
+		err "image '$MACOS_PODMAN_IMAGE' does not set OSXCROSS_SDK; rebuild it with build_container.sh"
+
+	# A mismatch here would fail deep inside scons with a missing compiler binary, so catch
+	# it while the message can still say what went wrong.
+	if [ -n "$OSXCROSS_SDK" ] && [ "$OSXCROSS_SDK" != "$sdk" ]; then
+		err "--osxcross-sdk $OSXCROSS_SDK does not match the image's toolchain ($sdk); drop the flag or rebuild the image against that SDK"
+	fi
+
+	OSXCROSS_SDK="$sdk"
+	[ -n "$MACOS_VULKAN_SDK_PATH" ] || MACOS_VULKAN_SDK_PATH="$mvk"
+
+	echo ">>> osxcross image $MACOS_PODMAN_IMAGE: toolchain $OSXCROSS_SDK, linker $OSXCROSS_LINKER"
+}
+
+# Run a scons build inside the osxcross toolchain image. The image already exports
+# OSXCROSS_ROOT (which platform/macos/detect.py gates macOS support on) and puts
+# target/bin on PATH, so nothing has to be set up here.
+run_podman_macos_scons() {
+	# The container starts with a clean environment, so a script encryption key resolved on
+	# the host has to be forwarded explicitly or the template is silently built with a zero
+	# key and will not load an encrypted PCK.
+	local -a podman_env=()
+	if [ -n "${SCRIPT_AES256_ENCRYPTION_KEY:-}" ]; then
+		podman_env+=("-e" "SCRIPT_AES256_ENCRYPTION_KEY")
+	fi
+
+	echo ">>> podman run (image=$MACOS_PODMAN_IMAGE) scons $*"
+	podman run --rm \
+		-v "$(pwd)":/root/godot:z \
+		-w /root/godot \
+		"${podman_env[@]}" \
+		"$MACOS_PODMAN_IMAGE" \
+		bash -c "scons $(printf '%q ' "$@")"
 }
 
 # Point out where the .debugsymbols side files landed so they can be archived for
@@ -556,6 +696,13 @@ if [ "$ALL_TEMPLATES" -eq 1 ]; then
 	platforms=("linuxbsd" "windows")
 	if [ "$host" = "macos" ] || [ -n "$OSXCROSS_SDK" ]; then
 		platforms+=("macos")
+	elif [ "$USE_PODMAN" -eq 1 ] && command -v podman >/dev/null 2>&1 &&
+		podman image exists "$MACOS_PODMAN_IMAGE" 2>/dev/null; then
+		# --podman on a Linux host can cover macOS too, but only if the osxcross image is
+		# actually there; otherwise leave it out rather than failing a multi-platform run.
+		platforms+=("macos")
+	else
+		echo ">>> skipping macOS templates (no --osxcross-sdk, and no $MACOS_PODMAN_IMAGE image for --podman)" >&2
 	fi
 	if command -v emcc >/dev/null 2>&1; then
 		platforms+=("web")
