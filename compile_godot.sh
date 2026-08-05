@@ -25,7 +25,7 @@ PLATFORM=""          # linuxbsd | windows | macos (default: host)
 BUILD_TYPE="editor"  # editor | release | debug-template
 LTO=""               # "" (auto from build type) | none | thin | full
 NO_DEPRECATED=0
-DEV_BUILD=1
+DEV_BUILD=0
 DO_CLEAN=0
 ALL_TEMPLATES=0
 JOBS=""
@@ -65,9 +65,12 @@ Target platform (default: host OS):
                           Templates only: combine with --release / --debug-template.
 
 Build type (default: --editor):
-  --editor               Editor build (dev_build, clang+mold+ccache, no LTO)
-  --no-dev-build         Build the editor without dev_build=yes (smaller/faster, non-dev binary)
-  --release              Release export template (production, lto=full, no update check)
+  --editor               Editor build (clang+mold+ccache, no LTO)
+  --dev-build            Build the editor with dev_build=yes (dev binary, extra checks)
+  --no-dev-build         Accepted for compatibility; non-dev is now the default
+  --release              Release export template (production, lto=full except on macOS,
+                          where osxcross's cctools ranlib cannot index LTO bitcode
+                          archives; no update check)
   --debug-template       Debug export template (production)
   --all-templates        Build release + debug templates for linux+windows (+macos on a mac
                           or with --osxcross-sdk, +web when emcc is on PATH)
@@ -262,6 +265,7 @@ while [ $# -gt 0 ]; do
 			shift; [ $# -gt 0 ] || err "--lto needs an argument"
 			LTO="$1" ;;
 		--no-deprecated) NO_DEPRECATED=1 ;;
+		--dev-build) DEV_BUILD=1 ;;
 		--no-dev-build) DEV_BUILD=0 ;;
 		--webgpu) WEBGPU=1 ;;
 		--jobs)
@@ -400,6 +404,10 @@ build() {
 	case "$btype" in
 		editor)
 			args+=("target=editor")
+			# Editor keeps --script/--path/--scene. SConstruct forces OVERRIDE_PATH_ENABLED
+			# on for editor builds regardless, so this only pins the intent; templates keep
+			# the secure default of disable_path_overrides=yes.
+			args+=("disable_path_overrides=no")
 			if [ "$DEV_BUILD" -eq 1 ]; then
 				args+=("dev_build=yes")
 			fi
@@ -434,9 +442,14 @@ build() {
 	# LTO: explicit override wins; otherwise native templates default to full, editor to
 	# none. Web templates pass nothing and let production=yes pick Emscripten's default;
 	# forcing lto=full there makes wasm-ld linking extremely slow and memory hungry.
+	#
+	# macOS is excluded: under LTO the static archives hold LLVM bitcode, which osxcross's
+	# cctools ranlib cannot index, so every archive gets an empty table of contents and the
+	# link fails with undefined core symbols. platform/macos/detect.py wires AR/RANLIB to
+	# cctools for osxcross builds, and defaults macOS to lto=none for the same reason.
 	if [ -n "$LTO" ]; then
 		args+=("lto=$LTO")
-	elif [ "$btype" != "editor" ] && [ "$plat" != "web" ]; then
+	elif [ "$btype" != "editor" ] && [ "$plat" != "web" ] && [ "$plat" != "macos" ]; then
 		args+=("lto=full")
 	fi
 

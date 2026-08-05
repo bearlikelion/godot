@@ -4124,7 +4124,11 @@ int Main::start() {
 		else if (E->next()) {
 			bool parsed_pair = true;
 			if (E->get() == "-s" || E->get() == "--script") {
+#if defined(OVERRIDE_PATH_ENABLED)
+				script = E->next()->get();
+#else
 				script = "";
+#endif // defined(OVERRIDE_PATH_ENABLED)
 			} else if (E->get() == "--main-loop") {
 				main_loop_type = E->next()->get();
 #ifdef TOOLS_ENABLED
